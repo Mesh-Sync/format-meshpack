@@ -68,7 +68,7 @@ def get_type_info(prop, prop_name, definitions=None):
             return {"base": class_name, "is_inline_class": True, "properties": prop["properties"]}
         
         # Generic object (Dict/Map)
-        return {"base": "dictionary", "is_primitive": True}
+        return {"base": "dictionary", "is_primitive": True, "is_dictionary": True}
         
     # Valid types can be ["string", "null"]
     if isinstance(t, list):

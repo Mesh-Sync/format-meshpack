@@ -75,11 +75,13 @@ impl MeshPackReader {
             return Ok(());
         }
 
-        // Read Manifest
-        let mut manifest_file = self.archive.by_name("manifest.json")?;
-        let mut content = String::new();
-        manifest_file.read_to_string(&mut content)?;
-        self.manifest = Some(serde_json::from_str(&content)?);
+        // Read Manifest - use block to limit scope of borrow
+        {
+            let mut manifest_file = self.archive.by_name("manifest.json")?;
+            let mut content = String::new();
+            manifest_file.read_to_string(&mut content)?;
+            self.manifest = Some(serde_json::from_str(&content)?);
+        }
 
         // Read Shards
         // Getting names requires iterating
