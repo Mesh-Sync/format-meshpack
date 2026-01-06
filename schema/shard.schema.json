@@ -43,6 +43,8 @@
           "pattern": "^[a-z0-9]+:[a-f0-9]+$" 
         },
         "modified_at": { "type": "string", "format": "date-time" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "mime_type": { "type": "string" },
         "resource_ref": { 
             "type": ["string", "null"],
             "description": "If not null, corresponds to a file in resources/<hash>.<ext>"

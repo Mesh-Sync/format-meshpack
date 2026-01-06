@@ -272,6 +272,7 @@ serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
 chrono = {{ version = "0.4", features = ["serde"] }}
 zip = "0.6"
+typed-builder = "0.18"
 """
     with open(os.path.join(OUTPUT_DIR, "rust", "meshpack", "Cargo.toml"), "w") as f:
         f.write(cargo_toml)

@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use zip::ZipArchive;
+use typed_builder::TypedBuilder;
 
 // Version: {{ version }}
 
@@ -15,19 +16,21 @@ use zip::ZipArchive;
 pub enum OSType {
     Linux,
     Windows,
-    Darwin,
+    Macos,
     Unknown,
 }
 {% else %}
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TypedBuilder)]
 pub struct {{ model.name }} {
 {% for field in model.fields %}
     {% if field.type.is_dictionary %}
     #[serde(default)]
+    #[builder(default)]
     pub {{ field.name }}: HashMap<String, serde_json::Value>,
     {% else %}
         {% if field.required == false %}
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[builder(default, setter(strip_option))]
         {% endif %}
     pub {{ field.name }}: 
         {%- if field.type.is_array -%}
