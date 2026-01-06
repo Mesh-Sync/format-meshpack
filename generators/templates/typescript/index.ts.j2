@@ -1,0 +1,141 @@
+import JSZip from 'jszip';
+
+// Version: {{ version }}
+
+{% for model in models %}
+{% if model.name == "OSType" %}
+export enum OSType {
+  Linux = "linux",
+  Windows = "windows",
+  Darwin = "darwin",
+  Unknown = "unknown",
+}
+{% else %}
+export interface {{ model.name }} {
+{% for field in model.fields %}
+  {% if field.required == false %}
+  {{ field.name }}?: 
+  {% else %}
+  {{ field.name }}: 
+  {% endif %}
+  {%- if field.type.is_array -%}
+  {{ field.type.item_type.base }}[]
+  {%- elif field.type.base == "string" -%}
+  string
+  {%- elif field.type.base == "integer" -%}
+  number
+  {%- elif field.type.base == "boolean" -%}
+  boolean
+  {%- elif field.type.base == "datetime" -%}
+  string
+  {%- elif field.type.base == "email" -%}
+  string
+  {%- elif field.type.base == "dictionary" -%}
+  Record<string, any>
+  {%- else -%}
+  {{ field.type.base }}
+  {%- endif -%};
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+
+export class MeshPackReader {
+    private zip: JSZip;
+    private manifest: Manifest | null = null;
+    private fileMap: Map<string, FileEntry> = new Map();
+    private loaded: boolean = false;
+
+    constructor() {
+        this.zip = new JSZip();
+    }
+
+    async loadAsync(data: ArrayBuffer | Uint8Array): Promise<void> {
+        if (this.loaded) return;
+
+        await this.zip.loadAsync(data);
+        
+        // Manifest
+        const manifestFile = this.zip.file("manifest.json");
+        if (manifestFile) {
+            const content = await manifestFile.async("string");
+            this.manifest = JSON.parse(content) as Manifest;
+        }
+
+        // Shards
+        const shardFiles = this.zip.file(/index\/.*\.json/);
+        for (const f of shardFiles) {
+            const content = await f.async("string");
+            const shard = JSON.parse(content) as Shard;
+            for (const entry of shard.entries) {
+                this.fileMap.set(entry.path, entry);
+            }
+        }
+        
+        this.loaded = true;
+    }
+
+    getManifest(): Manifest | null {
+        return this.manifest;
+    }
+
+    getFileEntry(path: string): FileEntry | undefined {
+        return this.fileMap.get(path);
+    }
+    
+    getModelsInstances(): FileEntry[] {
+        const modelExts = [".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"];
+        return this.listByExtension(modelExts);
+    }
+
+    /**
+     * Reads the binary content of the associated resource.
+     * @param entry The FileEntry to read the resource for.
+     * @param type The output type format ("blob", "arraybuffer", "uint8array", etc). Defaults to "blob".
+     */
+    async readResourceAsync(entry: FileEntry, type: "blob" | "arraybuffer" | "uint8array" | "string" = "blob"): Promise<any> {
+        if (!entry.resource_ref) return null;
+        
+        const path = `resources/${entry.resource_ref}`;
+        const file = this.zip.file(path);
+        
+        if (!file) return null;
+        return await file.async(type);
+    }
+
+    /**
+     * Find files by exact content hash.
+     */
+    getFilesByHash(hash: string): FileEntry[] {
+        return Array.from(this.fileMap.values()).filter(f => f.hash === hash);
+    }
+
+    /**
+     * List files matching specific extensions (case-insensitive).
+     * @param extensions List of extensions with dot (e.g. [".jpg", ".png"])
+     */
+    listByExtension(extensions: string[]): FileEntry[] {
+        const normalized = extensions.map(e => e.toLowerCase());
+        return Array.from(this.fileMap.values()).filter(f => {
+             const lower = f.path.toLowerCase();
+             return normalized.some(ext => lower.endsWith(ext));
+        });
+    }
+
+    /**
+     * Checks if all resource_ref pointers exist in the archive.
+     * Returns list of paths with missing resources.
+     */
+    validateIntegrity(): string[] {
+        const missing: string[] = [];
+        for (const entry of this.fileMap.values()) {
+            if (entry.resource_ref) {
+                const path = `resources/${entry.resource_ref}`;
+                if (!this.zip.file(path)) {
+                    missing.push(entry.path);
+                }
+            }
+        }
+        return missing;
+    }
+}

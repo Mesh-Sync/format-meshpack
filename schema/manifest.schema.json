@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meshsync.net/schemas/mpack/manifest.json",
+  "title": "MeshPack Manifest",
+  "description": "Root metadata for MeshPack archive",
+  "type": "object",
+  "required": [
+    "format_version",
+    "created_at",
+    "workspace_id",
+    "creator_info",
+    "platform_info",
+    "index_summary"
+  ],
+  "properties": {
+    "format_version": {
+      "type": "string",
+      "description": "Semantic versioning of the .mpack format",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "creator_info": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" }
+      }
+    },
+    "license": {
+      "type": ["string", "null"]
+    },
+    "platform_info": {
+      "type": "object",
+      "required": ["os", "path_separator", "is_case_sensitive"],
+      "properties": {
+        "os": { 
+          "type": "string",
+          "enum": ["linux", "windows", "darwin", "unknown"]
+        },
+        "path_separator": { "type": "string" },
+        "is_case_sensitive": { "type": "boolean" }
+      }
+    },
+    "index_summary": {
+      "type": "object",
+      "required": ["total_files", "total_shards"],
+      "properties": {
+        "total_files": { "type": "integer", "minimum": 0 },
+        "total_shards": { "type": "integer", "minimum": 1 },
+        "total_size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

@@ -1,0 +1,160 @@
+from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, Field, EmailStr
+from datetime import datetime
+from enum import Enum
+import zipfile
+import json
+import os
+
+# Version: {{ version }}
+
+{% for model in models %}
+{% if model.name == "OSType" %}
+# Enum handled implicitly or manually? Assuming manually for now as per previous, 
+# but let's make it consistent if schema generates it.
+# Check if fields implies enum
+class OSType(str, Enum):
+    LINUX = "linux"
+    WINDOWS = "windows"
+    DARWIN = "darwin"
+    UNKNOWN = "unknown"
+{% else %}
+class {{ model.name }}(BaseModel):
+{% for field in model.fields %}
+    {% if field.type.is_inline_class %}
+    {{ field.name }}: '{{ field.type.base }}'
+    {% elif field.type.is_enum %}
+    {{ field.name }}: {{ field.type.base }}
+    {% elif field.type.is_primitive %}
+        {% if field.type.base == "string" %}
+    {{ field.name }}: {{ "str" if field.required else "Optional[str]" }} {{ "= None" if not field.required else "" }}
+        {% elif field.type.base == "integer" %}
+    {{ field.name }}: {{ "int" if field.required else "Optional[int]" }} {{ "= None" if not field.required else "" }}
+        {% elif field.type.base == "boolean" %}
+    {{ field.name }}: {{ "bool" if field.required else "Optional[bool]" }} {{ "= False" if not field.required else "" }} # Defaulting bool to False if optional usually
+        {% elif field.type.base == "datetime" %}
+    {{ field.name }}: {{ "datetime" if field.required else "Optional[datetime]" }} {{ "= None" if not field.required else "" }}
+        {% elif field.type.base == "email" %}
+    {{ field.name }}: {{ "EmailStr" if field.required else "Optional[EmailStr]" }} {{ "= None" if not field.required else "" }}
+        {% elif field.type.base == "dictionary" %}
+    {{ field.name }}: Dict[str, Any] = Field(default_factory=dict)
+        {% endif %}
+    {% elif field.type.is_array %}
+    {{ field.name }}: List['{{ field.type.item_type.base }}'] = Field(default_factory=list)
+    {% elif field.type.is_ref %}
+    {{ field.name }}: '{{ field.type.base }}'
+    {% endif %}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+# Utility Class
+class MeshPackReader:
+    def __init__(self, file_path: str):
+        self.file_path = file_path
+        self._zip = zipfile.ZipFile(file_path, 'r')
+        self._manifest: Optional[Manifest] = None
+        self._files: Dict[str, FileEntry] = {}
+        self._loaded = False
+
+    def load(self):
+        if self._loaded:
+            return
+        
+        # Load Manifest
+        with self._zip.open("manifest.json") as f:
+            data = json.load(f)
+            self._manifest = Manifest(**data)
+            
+        # Load Shards
+        for name in self._zip.namelist():
+            if name.startswith("index/") and name.endswith(".json"):
+                with self._zip.open(name) as f:
+                    shard_data = json.load(f)
+                    shard = Shard(**shard_data)
+                    for entry in shard.entries:
+                        self._files[entry.path] = entry
+        
+        self._loaded = True
+
+    @property
+    def manifest(self) -> Manifest:
+        self.load()
+        return self._manifest # type: ignore
+
+    def get_file_entry(self, path: str) -> Optional[FileEntry]:
+        self.load()
+        return self._files.get(path)
+
+    def list_models_instances(self) -> List[FileEntry]:
+        self.load()
+        # Naive extension check
+        model_exts = {".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"}
+        return [
+            f for f in self._files.values() 
+            if os.path.splitext(f.path)[1].lower() in model_exts
+        ]
+
+    def get_associated_resources(self, file_entry: FileEntry) -> List[str]:
+        """
+        Returns a list of keys (hashes) or paths for associated resources.
+        Currently primarily looks at 'resource_ref'.
+        """
+        refs = []
+        if file_entry.resource_ref:
+            refs.append(file_entry.resource_ref)
+        return refs
+
+    def read_resource(self, file_entry: FileEntry) -> Optional[bytes]:
+        """
+        Reads the content of the associated resource if it exists in the pack.
+        Returns bytes of the file content (e.g. thumbnail image).
+        """
+        if not file_entry.resource_ref:
+            return None
+        
+        # Internal path convention: resources/<hash>.<ext> or just <filename>
+        # The resource_ref IS the filename in the resources/ folder
+        path = f"resources/{file_entry.resource_ref}"
+        try:
+            with self._zip.open(path) as f:
+                return f.read()
+        except KeyError:
+            return None
+
+    def get_files_by_hash(self, file_hash: str) -> List[FileEntry]:
+        """Finds all file entries matching a specific content hash."""
+        self.load()
+        return [f for f in self._files.values() if f.hash == file_hash]
+
+    def list_by_extension(self, extensions: List[str]) -> List[FileEntry]:
+        """
+        Generic filter by extension.
+        Args:
+            extensions: List of extensions including dot, e.g. ['.jpg', '.png']
+        """
+        self.load()
+        # Normalize extensions to lowercase
+        exts = {e.lower() for e in extensions}
+        return [
+            f for f in self._files.values() 
+            if os.path.splitext(f.path)[1].lower() in exts
+        ]
+
+    def validate_integrity(self) -> Dict[str, List[str]]:
+        """
+        Checks if all referenced resources exist in the zip.
+        Returns a dict with 'missing_resources'.
+        """
+        self.load()
+        missing = []
+        for entry in self._files.values():
+            if entry.resource_ref:
+                path = f"resources/{entry.resource_ref}"
+                try:
+                    self._zip.getinfo(path)
+                except KeyError:
+                    missing.append(entry.path)
+        
+        return {"missing_resources": missing}

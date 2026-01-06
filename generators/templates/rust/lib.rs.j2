@@ -1,0 +1,153 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use chrono::{DateTime, Utc};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+use zip::ZipArchive;
+
+// Version: {{ version }}
+
+{% for model in models %}
+{% if model.name == "OSType" %}
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum OSType {
+    Linux,
+    Windows,
+    Darwin,
+    Unknown,
+}
+{% else %}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct {{ model.name }} {
+{% for field in model.fields %}
+    {% if field.type.is_dictionary %}
+    #[serde(default)]
+    pub {{ field.name }}: HashMap<String, serde_json::Value>,
+    {% else %}
+        {% if field.required == false %}
+    #[serde(skip_serializing_if = "Option::is_none")]
+        {% endif %}
+    pub {{ field.name }}: 
+        {%- if field.type.is_array -%}
+        Vec<{{ field.type.item_type.base }}>
+        {%- elif field.type.base == "string" -%}
+        {{ "String" if field.required else "Option<String>" }}
+        {%- elif field.type.base == "integer" -%}
+        {{ "u64" if field.required else "Option<u64>" }}
+        {%- elif field.type.base == "boolean" -%}
+        {{ "bool" if field.required else "Option<bool>" }}
+        {%- elif field.type.base == "datetime" -%}
+        {{ "DateTime<Utc>" if field.required else "Option<DateTime<Utc>>" }}
+        {%- elif field.type.base == "email" -%}
+        {{ "String" if field.required else "Option<String>" }}
+        {%- else -%}
+        {{ field.type.base if field.required else "Option<" + field.type.base + ">" }}
+        {%- endif -%},
+    {% endif %}
+{% endfor %}
+}
+{% endif %}
+{% endfor %}
+
+pub struct MeshPackReader {
+    archive: ZipArchive<File>,
+    manifest: Option<Manifest>,
+    files: HashMap<String, FileEntry>,
+    loaded: bool,
+}
+
+impl MeshPackReader {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let file = File::open(path)?;
+        let archive = ZipArchive::new(file)?;
+        Ok(Self {
+            archive,
+            manifest: None,
+            files: HashMap::new(),
+            loaded: false,
+        })
+    }
+
+    pub fn load_index(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.loaded {
+            return Ok(());
+        }
+
+        // Read Manifest
+        let mut manifest_file = self.archive.by_name("manifest.json")?;
+        let mut content = String::new();
+        manifest_file.read_to_string(&mut content)?;
+        self.manifest = Some(serde_json::from_str(&content)?);
+
+        // Read Shards
+        // Getting names requires iterating
+        let names: Vec<String> = self.archive.file_names().map(|s| s.to_string()).collect();
+        for name in names {
+            if name.starts_with("index/") && name.ends_with(".json") {
+                 let mut shard_file = self.archive.by_name(&name)?;
+                 let mut s_content = String::new();
+                 shard_file.read_to_string(&mut s_content)?;
+                 let shard: Shard = serde_json::from_str(&s_content)?;
+                 
+                 for entry in shard.entries {
+                     self.files.insert(entry.path.clone(), entry);
+                 }
+            }
+        }
+        
+        self.loaded = true;
+        Ok(())
+    }
+
+    pub fn get_manifest(&mut self) -> Result<&Manifest, Box<dyn std::error::Error>> {
+        self.load_index()?;
+        self.manifest.as_ref().ok_or("Manifest not loaded".into())
+    }
+
+    pub fn get_file_entry(&mut self, path: &str) -> Result<Option<&FileEntry>, Box<dyn std::error::Error>> {
+        self.load_index()?;
+        Ok(self.files.get(path))
+    }
+
+    /// Reads the binary content of a resource referenced by a FileEntry.
+    /// Returns Ok(Some(Vec<u8>)) if found, Ok(None) if not referenced or missing, Err on IO error.
+    pub fn read_resource(&mut self, entry: &FileEntry) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+        if let Some(ref res_ref) = entry.resource_ref {
+            let path = format!("resources/{}", res_ref);
+            let mut file = match self.archive.by_name(&path) {
+                Ok(f) => f,
+                Err(_) => return Ok(None),
+            };
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            Ok(Some(buffer))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_files_by_hash(&mut self, hash: &str) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
+        self.load_index()?;
+        Ok(self.files.values()
+            .filter(|f| f.hash == hash)
+            .collect())
+    }
+
+    pub fn list_by_extension(&mut self, extensions: &[&str]) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
+        self.load_index()?;
+        Ok(self.files.values()
+            .filter(|f| {
+                let path = std::path::Path::new(&f.path);
+                if let Some(ext_os) = path.extension() {
+                    if let Some(ext_str) = ext_os.to_str() {
+                        let dot_ext = format!(".{}", ext_str.to_lowercase());
+                        return extensions.contains(&dot_ext.as_str());
+                    }
+                }
+                false
+            })
+            .collect())
+    }
+}
