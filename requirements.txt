@@ -1,0 +1,4 @@
+jinja2
+check-jsonschema
+build
+twine
