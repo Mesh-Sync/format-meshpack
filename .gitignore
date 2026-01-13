@@ -9,3 +9,20 @@ dist/
 build/
 .pytest_cache/
 .mypy_cache/
+
+# LaTeX build artifacts
+definition/latex/*.aux
+definition/latex/*.log
+definition/latex/*.out
+definition/latex/*.toc
+definition/latex/*.lof
+definition/latex/*.lot
+definition/latex/*.fls
+definition/latex/*.fdb_latexmk
+definition/latex/*.synctex.gz
+definition/latex/*.bbl
+definition/latex/*.blg
+definition/latex/sections/*.aux
+definition/latex/main.pdf
+definition/latex/assets/figures/*.png
+definition/latex/assets/figures/*.pdf

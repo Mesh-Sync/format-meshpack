@@ -1,10 +1,10 @@
 # Standard MeshPack (.meshpack)
 
-The official specification, schemas, and tooling for the **MeshPack** format — an universal, portable container for 3D assets, metadata, and cross-platform indices.
+The official specification, schemas, and tooling for the **MeshPack** format — a universal, portable container for 3D assets, metadata, and cross-platform indices.
 
 ## Introduction
 
-The `.meshpack` (or `.mpack`) format is a standardized container format used within the Mesh-Sync ecosystem to represent a snapshot of a file system or a collection of 3D assets. It serves as an intermediate data structure for synchronization, allowing the decoupling of the "Scanning" phase from the "Processing" phase.
+The `.meshpack` format is a standardized container format used within the Mesh-Sync ecosystem to represent a snapshot of a file system or a collection of 3D assets. It serves as an intermediate data structure for synchronization, allowing the decoupling of the "Scanning" phase from the "Processing" phase.
 
 This format is designed to be:
 - **Portable**: Can be moved across systems (with platform metadata).

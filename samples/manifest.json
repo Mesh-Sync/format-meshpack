@@ -1,0 +1,18 @@
+{
+  "format_version": "1.0.0",
+  "created_at": "2026-01-13T22:41:51.764620+00:00",
+  "workspace_id": "test-workspace-001",
+  "creator_info": {
+    "name": "meshsync-local-agent"
+  },
+  "platform_info": {
+    "os": "linux",
+    "path_separator": "/",
+    "is_case_sensitive": true
+  },
+  "index_summary": {
+    "total_files": 17,
+    "total_shards": 1,
+    "total_size_bytes": 3179581
+  }
+}

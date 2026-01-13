@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/mpack/manifest.json",
+  "$id": "https://meshsync.net/schemas/meshpack/manifest.json",
   "title": "MeshPack Manifest",
   "description": "Root metadata for MeshPack archive",
   "type": "object",
@@ -15,7 +15,7 @@
   "properties": {
     "format_version": {
       "type": "string",
-      "description": "Semantic versioning of the .mpack format",
+      "description": "Semantic versioning of the .meshpack format",
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
     "created_at": {

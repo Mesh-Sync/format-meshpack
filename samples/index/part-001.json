@@ -1,0 +1,213 @@
+{
+  "shard_id": "part-001",
+  "format_version": "1.0.0",
+  "creator_info": {
+    "name": "meshsync-local-agent"
+  },
+  "entries": [
+    {
+      "path": "male02.obj",
+      "original_name": "male02.obj",
+      "size_bytes": 464590,
+      "hash": "sha256:6e521dceb9cf5b0d9b375c607364f23c7a9db7d56a135f2a74c2da698b7671b3",
+      "modified_at": "2026-01-13T18:00:31.974765+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "manifest.json",
+      "original_name": "manifest.json",
+      "size_bytes": 74,
+      "hash": "sha256:bb85e79657722363d4ab554926d08a322d867793fe8d50ee75e98c61e5329776",
+      "modified_at": "2026-01-13T22:41:51.555610+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "README.md",
+      "original_name": "README.md",
+      "size_bytes": 23,
+      "hash": "sha256:94b4f532673503ee114341245910e6186f7c80fa0b60fdc4f13e4e31f37a347f",
+      "modified_at": "2026-01-13T22:41:51.551610+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "LICENSE.txt",
+      "original_name": "LICENSE.txt",
+      "size_bytes": 21,
+      "hash": "sha256:7bca0e956e2a1cb335f804d10879cbf6a279a671f87394a9a5fbb77579743e01",
+      "modified_at": "2026-01-13T22:41:51.551610+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-unzipped/README.md",
+      "original_name": "README.md",
+      "size_bytes": 360,
+      "hash": "sha256:19bfe416264d49a589ee03d57fd6646090d03a70a0492c25566af61f829a0bff",
+      "modified_at": "2026-01-13T18:01:43.900093+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-unzipped/shuttle.obj",
+      "original_name": "shuttle.obj",
+      "size_bytes": 15658,
+      "hash": "sha256:03ab7fbb5e136c5601f313a72053cab112a06658d4c1e45701c87716393daabe",
+      "modified_at": "2026-01-13T18:01:34.570724+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-unzipped/al.obj",
+      "original_name": "al.obj",
+      "size_bytes": 183966,
+      "hash": "sha256:fb15e3e01e369f610eec865796e40d92de5c52ef81db72544d1708878f89eb9f",
+      "modified_at": "2026-01-13T18:01:33.858625+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-unzipped/sphere.obj",
+      "original_name": "sphere.obj",
+      "size_bytes": 14,
+      "hash": "sha256:d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed",
+      "modified_at": "2026-01-13T18:01:10.447290+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-unzipped/cube.obj",
+      "original_name": "cube.obj",
+      "size_bytes": 14,
+      "hash": "sha256:d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed",
+      "modified_at": "2026-01-13T18:01:10.155246+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-unzipped/stanford-bunny.obj",
+      "original_name": "stanford-bunny.obj",
+      "size_bytes": 2408417,
+      "hash": "sha256:1eb35d1e21ce99e5ce911353b6be278990713448dd9e8f5c9387f9de39b32205",
+      "modified_at": "2026-01-13T18:01:09.835198+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "library-zipped/classic-models-collection.zip",
+      "original_name": "classic-models-collection.zip",
+      "size_bytes": 106444,
+      "hash": "sha256:d56c7c7c773a6f39215b9eb2123095b4e728794f50729cbf70ba92d7cb529294",
+      "modified_at": "2026-01-13T18:02:30.247453+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "media/preview.jpg",
+      "original_name": "preview.jpg",
+      "size_bytes": 0,
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "modified_at": "2026-01-13T22:41:51.547609+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "media/thumbnail.png",
+      "original_name": "thumbnail.png",
+      "size_bytes": 0,
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "modified_at": "2026-01-13T22:41:51.547609+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "models/part_001.3mf",
+      "original_name": "part_001.3mf",
+      "size_bytes": 0,
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "modified_at": "2026-01-13T22:41:51.539608+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "models/test_model.obj",
+      "original_name": "test_model.obj",
+      "size_bytes": 0,
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "modified_at": "2026-01-13T22:41:51.535608+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "models/sample_cube.stl",
+      "original_name": "sample_cube.stl",
+      "size_bytes": 0,
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "modified_at": "2026-01-13T22:41:51.531608+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    },
+    {
+      "path": "nested/subfolder/nested_part.stl",
+      "original_name": "nested_part.stl",
+      "size_bytes": 0,
+      "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "modified_at": "2026-01-13T22:41:51.543609+00:00",
+      "resource_ref": null,
+      "attributes": {
+        "is_symlink": false,
+        "is_hidden": false
+      }
+    }
+  ]
+}

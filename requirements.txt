@@ -2,3 +2,8 @@ jinja2
 check-jsonschema
 build
 twine
+pytest
+mypy
+types-python-dateutil
+black
+flake8

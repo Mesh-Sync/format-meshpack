@@ -10,9 +10,6 @@ import os
 
 {% for model in models %}
 {% if model.name == "OSType" %}
-# Enum handled implicitly or manually? Assuming manually for now as per previous, 
-# but let's make it consistent if schema generates it.
-# Check if fields implies enum
 class OSType(str, Enum):
     LINUX = "linux"
     WINDOWS = "windows"
@@ -24,14 +21,14 @@ class {{ model.name }}(BaseModel):
     {% if field.type.is_inline_class %}
     {{ field.name }}: '{{ field.type.base }}'
     {% elif field.type.is_enum %}
-    {{ field.name }}: {{ field.type.base }}
+    {{ field.name }}: {{ field.type.base }} = Field(..., description="Enum value")
     {% elif field.type.is_primitive %}
         {% if field.type.base == "string" %}
     {{ field.name }}: {{ "str" if field.required else "Optional[str]" }} {{ "= None" if not field.required else "" }}
         {% elif field.type.base == "integer" %}
     {{ field.name }}: {{ "int" if field.required else "Optional[int]" }} {{ "= None" if not field.required else "" }}
         {% elif field.type.base == "boolean" %}
-    {{ field.name }}: {{ "bool" if field.required else "Optional[bool]" }} {{ "= False" if not field.required else "" }} # Defaulting bool to False if optional usually
+    {{ field.name }}: {{ "bool" if field.required else "Optional[bool]" }} {{ "= False" if not field.required else "" }}
         {% elif field.type.base == "datetime" %}
     {{ field.name }}: {{ "datetime" if field.required else "Optional[datetime]" }} {{ "= None" if not field.required else "" }}
         {% elif field.type.base == "email" %}

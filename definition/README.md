@@ -4,7 +4,7 @@ tags:
   - specification
   - meshpack
   - data-interchange
-title: 'MeshPack (.mpack) Standard Definition'
+title: 'MeshPack (.meshpack) Standard Definition'
 status: draft
 created_date: 2026-01-06
 updated_date: 2026-01-06
@@ -14,11 +14,11 @@ risk_level: medium
 effort_estimate: M
 ---
 
-# MeshPack (.mpack) Standard Definition
+# MeshPack (.meshpack) Standard Definition
 
 ## 1. Introduction
 
-The `.meshpack` (or `.mpack`) format is a standardized container format used within the Mesh-Sync ecosystem to represent a snapshot of a file system or a collection of 3D assets. It serves as an intermediate data structure for synchronization, allowing the decoupling of the "Scanning" phase from the "Processing" phase.
+The `.meshpack` format is a standardized container format used within the Mesh-Sync ecosystem to represent a snapshot of a file system or a collection of 3D assets. It serves as an intermediate data structure for synchronization, allowing the decoupling of the "Scanning" phase from the "Processing" phase.
 
 This format is designed to be:
 - **Portable**: Can be moved across systems (with platform metadata).
@@ -28,15 +28,15 @@ This format is designed to be:
 
 ## 2. File Format
 
-Physically, a `.mpack` file is a **ZIP archive** with a custom extension. It uses standard DEFLATE compression to minimize transfer size.
+Physically, a `.meshpack` file is a **ZIP archive** with a custom extension. It uses standard DEFLATE compression to minimize transfer size.
 
 ### Extension
-- Primary: `.mpack`
+- Primary: `.meshpack`
 - Alternative: `.meshpack`
 
 ## 3. Internal Structure
 
-A valid `.mpack` archive MUST contain the following structure:
+A valid `.meshpack` archive MUST contain the following structure:
 
 ```
 root/
@@ -66,12 +66,12 @@ The `manifest.json` file is the entry point for the package. It defines the owne
 
 ```json
 {
-  "format_version": "1.0.0", // SemVer of the .mpack specification
+  "format_version": "1.0.0", // SemVer of the .meshpack specification
   "created_at": "2026-01-06T12:00:00Z",
   "workspace_id": "uuid-string", // The workspace this snapshot belongs to
   "creator_info": {
-     "name": "Local Agent Scanner",
-     "email": "agent@meshsync.com"
+     "name": "Jordane Masson",
+     "email": "contact@meshsync.net"
   },
   "license": "Proprietary", // License of the CONTENT, not the format
   "platform_info": {
@@ -92,7 +92,7 @@ The `manifest.json` file is the entry point for the package. It defines the owne
 
 ### Fields Description
 
-*   **`format_version`**: Semantic versioning of the `.mpack` format itself. Parsers should use this to determine compatibility.
+*   **`format_version`**: Semantic versioning of the `.meshpack` format itself. Parsers should use this to determine compatibility.
 *   **`creator_info`**: Details about the entity that generated this pack.
 *   **`license`**: License applicable to the files *referenced* in this pack.
 *   **`workspace_id`**: **Scope Context**. The Manifest holds the workspace identity so that individual file entries remain portable and context-agnostic.
@@ -120,8 +120,8 @@ To handle libraries with hundreds of thousands of files without loading a monoli
   "shard_id": "part-001",
   "format_version": "1.0.0",
   "creator_info": {             // Redundant but required for standalone valid JSONs
-     "name": "Local Agent Scanner",
-     "email": "agent@meshsync.com"
+     "name": "Jordane Masson",
+     "email": "contact@meshsync.net"
   },
   "entries": [
       {
@@ -144,14 +144,14 @@ To handle libraries with hundreds of thousands of files without loading a monoli
 
 ### FileEntry Definition
 *   **`path`**: **Relative Path** from the root of the scanned directory. MUST NOT contain workspace ID or absolute system paths. MUST use forward slashes (`/`).
-*   **`resource_ref`**: If the actual file content is included in the `.mpack` (e.g. usage for thumbnails or small text files), this field contains the filename in the `resources/` folder.
+*   **`resource_ref`**: If the actual file content is included in the `.meshpack` (e.g. usage for thumbnails or small text files), this field contains the filename in the `resources/` folder.
 *   **`extensions`**: Allows tagging files with extra data (e.g. "preview_generated": true) without altering the core schema.
 
 ---
 
 ## 6. Resources Folder (`resources/`)
 
-If configured, the `.mpack` may contain actual file content, not just metadata. 
+If configured, the `.meshpack` may contain actual file content, not just metadata. 
 
 ### Flattening Strategy
 *   To avoid directory depth issues and path collisions, all files in `resources/` are **flattened**.
@@ -159,14 +159,14 @@ If configured, the `.mpack` may contain actual file content, not just metadata.
 *   **Linking**: The `FileEntry` in the index links to this file via the `resource_ref` field (which stores the hash) or implicitly if the `hash` matches.
 
 **Usage Rules**:
-*   Should only be used for small files (thumbnails, licenses, READMEs) to keep the `.mpack` portable.
+*   Should only be used for small files (thumbnails, licenses, READMEs) to keep the `.meshpack` portable.
 *   The `_README.md` in this folder must explain exactly what filtering logic was used to decide which files to include.
 
 ---
 
 ## 7. Documentation Requirements
 
-To ensure the `.mpack` is self-describing, the following `_README.md` files are mandatory:
+To ensure the `.meshpack` is self-describing, the following `_README.md` files are mandatory:
 
 1.  **`/_README.md`**:
     *   "This MeshPack was generated by [Creator] on [Date]. It contains metadata for [WorkspaceID]."
@@ -184,19 +184,19 @@ To ensure the `.mpack` is self-describing, the following `_README.md` files are 
 ## 8. Usage Scenarios
 
 ### 8.1. Local Storage Agent
-The `plugin-storage-localfilesystem` generates `.mpack` files during its "Scan" phase.
+The `plugin-storage-localfilesystem` generates `.meshpack` files during its "Scan" phase.
 1.  **Scan**: Walk directory, calculate hashes.
 2.  **Pack**: Stream entries into `index/part-XXX.json` object arrays inside the ZIP.
 3.  **Embed**: If config `include_thumbnails=true`, copy relevant files to `resources/` and link in `FileEntry`.
-4.  **Deploy**: The `.mpack` file is ready.
+4.  **Deploy**: The `.meshpack` file is ready.
 
 ### 8.2. Heuristic Analysis
 A separate "Heuristic Engine" can mount this package. Because it is read-only and structured:
 - It can process the file structure without needing physical access to the user's hard drive.
-- It enables "Remote Analysis" where the user only uploads the structure (the `.mpack` manifest), not the actual 500GB of heavy STL files.
+- It enables "Remote Analysis" where the user only uploads the structure (the `.meshpack` manifest), not the actual 500GB of heavy STL files.
 
 ## 9. Security & Privacy
 
 *   **Metadata Leakage**: Users must understand that `index/` reveals their folder names and hierarchy.
 *   **Creator Info**: The `creator_info` field allows tracing the source of the package (e.g. "My Laptop Agent") but might contain PII (email). Agents should allow anonymizing this.
-*   **Safe Parsing**: Consumers of `.mpack` MUST validate `format_version` before parsing to avoid incompatible schema structure issues.
+*   **Safe Parsing**: Consumers of `.meshpack` MUST validate `format_version` before parsing to avoid incompatible schema structure issues.
