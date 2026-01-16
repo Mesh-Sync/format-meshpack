@@ -1,0 +1,179 @@
+"""
+MeshPack Extension Helpers
+Version: {{ version }}
+
+Provides utilities for reading and writing versioned MeshSync extensions.
+Extensions follow the pattern: { "meshsync_<name>": { "v1": {...}, "v2": {...} } }
+"""
+
+from typing import Dict, Any, Optional, TypeVar, Generic, List
+from dataclasses import dataclass
+from enum import Enum
+
+# Extension names
+class ExtensionName(str, Enum):
+{% for ext in extensions %}
+    {{ ext.name.upper() }} = "{{ ext.name }}"
+{% endfor %}
+
+# Supported versions per extension
+EXTENSION_VERSIONS: Dict[str, List[str]] = {
+{% for ext in extensions %}
+    "{{ ext.name }}": {{ ext.versions }},
+{% endfor %}
+}
+
+
+T = TypeVar('T')
+
+
+def get_extension_version(extensions: Dict[str, Any], ext_name: str, version: str) -> Optional[Dict[str, Any]]:
+    """
+    Safely retrieve a specific version of an extension.
+    
+    Args:
+        extensions: The extensions dict from a FileEntry or Manifest
+        ext_name: Extension name (e.g., "meshsync_geometry")
+        version: Version string (e.g., "v1")
+    
+    Returns:
+        The extension data for that version, or None if not found
+    """
+    if not extensions:
+        return None
+    ext = extensions.get(ext_name)
+    if not ext or not isinstance(ext, dict):
+        return None
+    return ext.get(version)
+
+
+def get_latest_extension(extensions: Dict[str, Any], ext_name: str) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Get the highest version of an extension that exists.
+    
+    Args:
+        extensions: The extensions dict
+        ext_name: Extension name
+    
+    Returns:
+        Tuple of (version_string, data) or (None, None) if not found
+    """
+    if not extensions:
+        return None, None
+    ext = extensions.get(ext_name)
+    if not ext or not isinstance(ext, dict):
+        return None, None
+    
+    # Find all version keys (v1, v2, etc.) and sort them
+    versions = [k for k in ext.keys() if k.startswith('v') and k[1:].isdigit()]
+    if not versions:
+        return None, None
+    
+    # Sort by version number descending
+    versions.sort(key=lambda x: int(x[1:]), reverse=True)
+    latest = versions[0]
+    return latest, ext[latest]
+
+
+def get_best_extension(
+    extensions: Dict[str, Any], 
+    ext_name: str, 
+    max_version: Optional[str] = None
+) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Get the best matching version of an extension (highest <= max_version).
+    
+    Args:
+        extensions: The extensions dict
+        ext_name: Extension name
+        max_version: Maximum version to accept (e.g., "v2"). If None, returns latest.
+    
+    Returns:
+        Tuple of (version_string, data) or (None, None) if not found
+    """
+    if max_version is None:
+        return get_latest_extension(extensions, ext_name)
+    
+    if not extensions:
+        return None, None
+    ext = extensions.get(ext_name)
+    if not ext or not isinstance(ext, dict):
+        return None, None
+    
+    max_num = int(max_version[1:]) if max_version.startswith('v') else int(max_version)
+    
+    # Find all versions <= max_version
+    versions = [k for k in ext.keys() if k.startswith('v') and k[1:].isdigit()]
+    valid = [v for v in versions if int(v[1:]) <= max_num]
+    
+    if not valid:
+        return None, None
+    
+    valid.sort(key=lambda x: int(x[1:]), reverse=True)
+    best = valid[0]
+    return best, ext[best]
+
+
+def set_extension(
+    extensions: Dict[str, Any], 
+    ext_name: str, 
+    version: str, 
+    data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Set an extension version in the extensions dict.
+    
+    Args:
+        extensions: The extensions dict to modify
+        ext_name: Extension name
+        version: Version string (e.g., "v1")
+        data: Extension data
+    
+    Returns:
+        The modified extensions dict
+    """
+    if ext_name not in extensions:
+        extensions[ext_name] = {}
+    extensions[ext_name][version] = data
+    return extensions
+
+
+# ----- Typed Extension Accessors -----
+
+{% for ext in extensions %}
+@dataclass
+class {{ ext.name | replace('meshsync_', '') | title | replace('_', '') }}V1:
+    """Typed accessor for {{ ext.name }} v1 extension data."""
+    data: Dict[str, Any]
+    
+    @classmethod
+    def from_extensions(cls, extensions: Dict[str, Any]) -> Optional['{{ ext.name | replace("meshsync_", "") | title | replace("_", "") }}V1']:
+        """Extract {{ ext.name }} v1 from extensions dict."""
+        v, d = get_extension_version(extensions, "{{ ext.name }}", "v1"), None
+        if v is None:
+            _, d = get_best_extension(extensions, "{{ ext.name }}", "v1")
+        else:
+            d = v
+        if d is None:
+            return None
+        return cls(data=d)
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get a field from the extension data."""
+        return self.data.get(key, default)
+
+{% endfor %}
+
+# ----- Convenience Functions -----
+
+def get_geometry(extensions: Dict[str, Any]) -> Optional[GeometryV1]:
+    """Get meshsync_geometry extension (v1)."""
+    return GeometryV1.from_extensions(extensions)
+
+def get_dependencies(extensions: Dict[str, Any]) -> Optional[DependenciesV1]:
+    """Get meshsync_dependencies extension (v1)."""
+    return DependenciesV1.from_extensions(extensions)
+
+def get_printability(extensions: Dict[str, Any]) -> Optional[PrintabilityV1]:
+    """Get meshsync_printability extension (v1)."""
+    return PrintabilityV1.from_extensions(extensions)

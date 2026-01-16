@@ -139,3 +139,124 @@ export class MeshPackReader {
         return missing;
     }
 }
+
+// ================== Extension Helpers ==================
+
+/**
+ * Extension names supported by MeshSync
+ */
+export const ExtensionNames = {
+{% for ext in extensions %}
+  {{ ext.name | upper }}: '{{ ext.name }}',
+{% endfor %}
+} as const;
+
+/**
+ * Supported versions per extension
+ */
+export const ExtensionVersions: Record<string, string[]> = {
+{% for ext in extensions %}
+  '{{ ext.name }}': {{ ext.versions | tojson }},
+{% endfor %}
+};
+
+/**
+ * Get a specific version of an extension from the extensions object.
+ */
+export function getExtensionVersion<T = Record<string, any>>(
+  extensions: Record<string, any> | undefined,
+  extName: string,
+  version: string
+): T | undefined {
+  if (!extensions) return undefined;
+  const ext = extensions[extName];
+  if (!ext || typeof ext !== 'object') return undefined;
+  return ext[version] as T | undefined;
+}
+
+/**
+ * Get the latest (highest numbered) version of an extension.
+ */
+export function getLatestExtension<T = Record<string, any>>(
+  extensions: Record<string, any> | undefined,
+  extName: string
+): { version: string; data: T } | undefined {
+  if (!extensions) return undefined;
+  const ext = extensions[extName];
+  if (!ext || typeof ext !== 'object') return undefined;
+  
+  const versions = Object.keys(ext)
+    .filter(k => k.startsWith('v') && !isNaN(parseInt(k.slice(1))))
+    .sort((a, b) => parseInt(b.slice(1)) - parseInt(a.slice(1)));
+  
+  if (versions.length === 0) return undefined;
+  const latest = versions[0];
+  return { version: latest, data: ext[latest] as T };
+}
+
+/**
+ * Get the best matching version of an extension (<= maxVersion).
+ */
+export function getBestExtension<T = Record<string, any>>(
+  extensions: Record<string, any> | undefined,
+  extName: string,
+  maxVersion?: string
+): { version: string; data: T } | undefined {
+  if (!maxVersion) return getLatestExtension(extensions, extName);
+  if (!extensions) return undefined;
+  
+  const ext = extensions[extName];
+  if (!ext || typeof ext !== 'object') return undefined;
+  
+  const maxNum = parseInt(maxVersion.replace('v', ''));
+  const versions = Object.keys(ext)
+    .filter(k => k.startsWith('v') && !isNaN(parseInt(k.slice(1))))
+    .filter(k => parseInt(k.slice(1)) <= maxNum)
+    .sort((a, b) => parseInt(b.slice(1)) - parseInt(a.slice(1)));
+  
+  if (versions.length === 0) return undefined;
+  const best = versions[0];
+  return { version: best, data: ext[best] as T };
+}
+
+/**
+ * Set an extension version in the extensions object.
+ */
+export function setExtension(
+  extensions: Record<string, any>,
+  extName: string,
+  version: string,
+  data: Record<string, any>
+): Record<string, any> {
+  if (!extensions[extName]) {
+    extensions[extName] = {};
+  }
+  extensions[extName][version] = data;
+  return extensions;
+}
+
+// ================== Typed Extension Interfaces ==================
+
+{% for ext in extensions %}
+/**
+ * {{ ext.name }} v1 extension data
+ */
+export interface {{ ext.name | replace('meshsync_', '') | title | replace('_', '') }}V1 {
+  [key: string]: any;  // Allow additional properties from schema
+}
+
+{% endfor %}
+
+// ================== Convenience Accessors ==================
+
+export function getGeometry(extensions: Record<string, any> | undefined): GeometryV1 | undefined {
+  return getBestExtension<GeometryV1>(extensions, ExtensionNames.MESHSYNC_GEOMETRY, 'v1')?.data;
+}
+
+export function getDependencies(extensions: Record<string, any> | undefined): DependenciesV1 | undefined {
+  return getBestExtension<DependenciesV1>(extensions, ExtensionNames.MESHSYNC_DEPENDENCIES, 'v1')?.data;
+}
+
+export function getPrintability(extensions: Record<string, any> | undefined): PrintabilityV1 | undefined {
+  return getBestExtension<PrintabilityV1>(extensions, ExtensionNames.MESHSYNC_PRINTABILITY, 'v1')?.data;
+}

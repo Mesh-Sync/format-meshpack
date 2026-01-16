@@ -10,6 +10,7 @@ TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 # Fix: OUTPUT_DIR relative to BASE_DIR (generators/) is ../generated/sdks
 OUTPUT_DIR = os.path.join(os.path.dirname(BASE_DIR), "generated", "sdks")
 SCHEMA_DIR = os.path.join(os.path.dirname(BASE_DIR), "schema")
+EXTENSIONS_DIR = os.path.join(SCHEMA_DIR, "extensions")
 
 # Ensure output directories exist
 os.makedirs(os.path.join(OUTPUT_DIR, "python", "meshpack"), exist_ok=True)
@@ -208,12 +209,35 @@ def render_template(template_path, context, output_path):
         f.write(output)
     print(f"Generated: {output_path}")
 
+def load_extension_schemas():
+    """Load all extension schemas from the extensions/ directory."""
+    extensions = []
+    if not os.path.exists(EXTENSIONS_DIR):
+        return extensions
+    
+    for filename in os.listdir(EXTENSIONS_DIR):
+        if filename.endswith('.schema.json'):
+            filepath = os.path.join(EXTENSIONS_DIR, filename)
+            with open(filepath, 'r') as f:
+                schema = json.load(f)
+                # Extract extension name from filename: meshsync_geometry.schema.json -> meshsync_geometry
+                ext_name = filename.replace('.schema.json', '')
+                extensions.append({
+                    'name': ext_name,
+                    'schema': schema,
+                    'versions': list(schema.get('properties', {}).keys())  # e.g., ['v1', 'v2']
+                })
+    return extensions
+
 def main():
     manifest_schema = load_schema("manifest.schema.json")
     shard_schema = load_schema("shard.schema.json")
     
     manifest_models = extract_models(manifest_schema, "Manifest")
     shard_models = extract_models(shard_schema, "Shard")
+    
+    # Load extension schemas
+    extensions = load_extension_schemas()
     
     # Merge models, deduplicate by name
     all_models_map = {}
@@ -229,7 +253,8 @@ def main():
 
     context = {
         "version": VERSION,
-        "models": all_models
+        "models": all_models,
+        "extensions": extensions
     }
 
     # Python
@@ -238,9 +263,16 @@ def main():
         context, 
         os.path.join(OUTPUT_DIR, "python", "meshpack", "models.py")
     )
+    # Generate extension helpers
+    render_template(
+        "python/extensions.py.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "python", "meshpack", "extensions.py")
+    )
     # Also create __init__.py
     with open(os.path.join(OUTPUT_DIR, "python", "meshpack", "__init__.py"), "w") as f:
         f.write(f"from .models import *\n")
+        f.write(f"from .extensions import *\n")
     
     # pyproject.toml
     render_template(

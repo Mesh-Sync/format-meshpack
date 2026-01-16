@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meshsync.net/schemas/meshpack/extensions/meshsync_printability.json",
+  "title": "MeshSync Printability Extension",
+  "description": "3D printing analysis results, technology-agnostic with technology-specific sub-objects",
+  "type": "object",
+  "properties": {
+    "v1": {
+      "type": "object",
+      "description": "Version 1 of the printability extension schema",
+      "properties": {
+        "printability_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Overall printability rating (0.0-1.0)"
+        },
+        "is_watertight": {
+          "type": "boolean",
+          "description": "Required for most printing technologies"
+        },
+        "requires_supports": {
+          "type": "boolean",
+          "description": "Whether model needs support structures"
+        },
+        "has_overhangs": {
+          "type": "boolean",
+          "description": "Whether model has overhang geometry"
+        },
+        "optimal_orientation": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "Unit vector [x,y,z] for best print orientation"
+        },
+        "bounding_box_mm": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "[X, Y, Z] dimensions in mm"
+        },
+        "fdm": {
+          "type": "object",
+          "description": "FDM/FFF-specific analysis",
+          "properties": {
+            "estimated_print_time_minutes": { "type": "number", "minimum": 0 },
+            "estimated_filament_grams": { "type": "number", "minimum": 0 },
+            "estimated_filament_meters": { "type": "number", "minimum": 0 },
+            "recommended_layer_height_mm": { "type": "number", "minimum": 0 },
+            "recommended_nozzle_mm": { "type": "number", "minimum": 0 },
+            "recommended_infill_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "has_bridging": { "type": "boolean" },
+            "max_overhang_angle_deg": { "type": "number", "minimum": 0, "maximum": 90 }
+          }
+        },
+        "sla": {
+          "type": "object",
+          "description": "SLA/DLP/MSLA-specific analysis",
+          "properties": {
+            "estimated_print_time_minutes": { "type": "number", "minimum": 0 },
+            "estimated_resin_ml": { "type": "number", "minimum": 0 },
+            "recommended_layer_height_um": { "type": "number", "minimum": 0 },
+            "estimated_cure_time_per_layer_s": { "type": "number", "minimum": 0 },
+            "support_contact_points": { "type": "integer", "minimum": 0 },
+            "has_islands": {
+              "type": "boolean",
+              "description": "Disconnected regions that would fail to print"
+            },
+            "has_suction_cups": {
+              "type": "boolean",
+              "description": "Hollow regions that trap resin, causing failures"
+            }
+          }
+        },
+        "sls": {
+          "type": "object",
+          "description": "SLS (Selective Laser Sintering) specific analysis",
+          "properties": {
+            "estimated_print_time_minutes": { "type": "number", "minimum": 0 },
+            "estimated_powder_grams": { "type": "number", "minimum": 0 },
+            "recommended_layer_height_um": { "type": "number", "minimum": 0 },
+            "min_wall_thickness_mm": { "type": "number", "minimum": 0 },
+            "can_nest": {
+              "type": "boolean",
+              "description": "Whether multiple copies can be packed in build volume"
+            },
+            "packing_efficiency": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Ratio of model volume to bounding box volume"
+            }
+          }
+        },
+        "mjf": {
+          "type": "object",
+          "description": "MJF (Multi Jet Fusion) specific analysis",
+          "properties": {
+            "estimated_print_time_minutes": { "type": "number", "minimum": 0 },
+            "estimated_powder_grams": { "type": "number", "minimum": 0 },
+            "recommended_layer_height_um": { "type": "number", "minimum": 0 },
+            "min_feature_size_mm": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}
