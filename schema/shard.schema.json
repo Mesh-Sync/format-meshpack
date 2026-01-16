@@ -32,6 +32,8 @@
     },
     "entries": {
       "type": "array",
+      "description": "Array of file entries. L2 compliance requires max 10,000 entries OR 5MB uncompressed per shard (whichever triggers first). Validators SHOULD warn if limits exceeded.",
+      "maxItems": 10000,
       "items": {
         "$ref": "#/definitions/fileEntry"
       }
@@ -77,15 +79,18 @@
         },
         "bounding_box": {
           "type": "object",
+          "description": "Axis-aligned bounding box in the SOURCE file's coordinate system. Use 'up_axis' to determine orientation. If 'up_axis' is +Z (common for STL), Z is vertical. If +Y (common for glTF), Y is vertical. Bounds are NOT transformed; consumers must apply up_axis conversion if needed. Units match the 'units' field.",
           "properties": {
             "min": {
               "type": "array",
+              "description": "[x, y, z] minimum corner in source coordinate system",
               "items": { "type": "number" },
               "minItems": 3,
               "maxItems": 3
             },
             "max": {
               "type": "array",
+              "description": "[x, y, z] maximum corner in source coordinate system",
               "items": { "type": "number" },
               "minItems": 3,
               "maxItems": 3
@@ -149,6 +154,14 @@
         },
         "extensions": {
           "type": "object",
+          "description": "Extension data. Reserved keys starting with '_' are spec-defined.",
+          "properties": {
+            "_deleted": {
+              "type": "boolean",
+              "const": true,
+              "description": "Delta pack marker: if true, this entry was DELETED from the base pack. When present, size_bytes MUST be 0 and hash MUST be all zeros."
+            }
+          },
           "additionalProperties": true
         }
       }
