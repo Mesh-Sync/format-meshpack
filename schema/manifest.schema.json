@@ -7,10 +7,11 @@
   "required": [
     "format_version",
     "created_at",
-    "workspace_id",
     "creator_info",
     "platform_info",
-    "index_summary"
+    "index_summary",
+    "hash_algo",
+    "shard_list"
   ],
   "properties": {
     "format_version": {
@@ -23,8 +24,9 @@
       "format": "date-time"
     },
     "workspace_id": {
-      "type": "string",
-      "format": "uuid"
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Optional workspace context. Required for MeshSync ecosystem, optional for standalone use."
     },
     "creator_info": {
       "type": "object",
@@ -49,6 +51,29 @@
         "is_case_sensitive": { "type": "boolean" }
       }
     },
+    "hash_algo": {
+      "type": "string",
+      "enum": ["sha256", "sha512", "blake3"],
+      "description": "Algorithm used for pack_hash and shard/resource hashes"
+    },
+    "pack_hash": {
+      "type": "string",
+      "description": "IMPORTANT: This is a REFERENCE value only. The authoritative pack_hash MUST be distributed via a detached sidecar file (<name>.meshpack.sig) because the hash cannot be computed until after the archive is finalized. Verifiers MUST use the sidecar, not this embedded value.",
+      "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+    },
+    "signatures": {
+      "type": "array",
+      "description": "Optional signatures over pack_hash",
+      "items": {
+        "type": "object",
+        "required": ["alg", "public_key", "signature"],
+        "properties": {
+          "alg": { "type": "string", "enum": ["ed25519", "rsa-pss-sha256"] },
+          "public_key": { "type": "string" },
+          "signature": { "type": "string" }
+        }
+      }
+    },
     "index_summary": {
       "type": "object",
       "required": ["total_files", "total_shards"],
@@ -56,6 +81,70 @@
         "total_files": { "type": "integer", "minimum": 0 },
         "total_shards": { "type": "integer", "minimum": 1 },
         "total_size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "shard_list": {
+      "type": "array",
+      "description": "Canonical ordering and hashes of shards",
+      "items": {
+        "type": "object",
+        "required": ["id", "entries_count", "entries_hash"],
+        "properties": {
+          "id": { "type": "string" },
+          "entries_count": { "type": "integer", "minimum": 0 },
+          "entries_hash": { "type": "string", "pattern": "^[a-z0-9]+:[a-f0-9]+$" }
+        }
+      }
+    },
+    "ids": {
+      "type": "array",
+      "description": "Identifiers for the workspace/library in various namespaces",
+      "items": {
+        "type": "object",
+        "required": ["ns", "id"],
+        "properties": {
+          "ns": { "type": "string" },
+          "id": { "type": "string" }
+        }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "description": "Provenance and configuration used to generate the pack",
+      "properties": {
+        "generator": { "type": "string" },
+        "config": { "type": "object", "additionalProperties": true },
+        "resume_token": { "type": "string" },
+        "partial": { "type": "boolean" },
+        "base_pack_hash": { "type": "string", "pattern": "^[a-z0-9]+:[a-f0-9]+$" }
+      }
+    },
+    "import_policy": {
+      "type": "object",
+      "description": "Guidance for conflict handling when importing into another backend",
+      "properties": {
+        "id_conflict": { 
+          "type": "string", 
+          "enum": ["fail", "rename", "overwrite"],
+          "description": "fail: reject import if ID exists; rename: generate new ID; overwrite: replace existing"
+        },
+        "metamodel_merge": { 
+          "type": "string", 
+          "enum": ["strict", "append", "reconcile"],
+          "description": "strict: reject if metamodel structure differs; append: add files to existing metamodel; reconcile: merge with conflict resolution"
+        },
+        "strip_creator_info": { 
+          "type": "boolean",
+          "description": "If true, importer should remove creator_info before storing"
+        }
+      }
+    },
+    "encryption": {
+      "type": "object",
+      "properties": {
+        "alg": { "type": "string", "enum": ["age", "pgp"] },
+        "recipients": { "type": "array", "items": { "type": "string" } },
+        "encrypted": { "type": "boolean" }
       }
     },
     "extensions": {

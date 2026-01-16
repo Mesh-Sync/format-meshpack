@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meshsync.net/schemas/meshpack/sidecar.json",
+  "title": "MeshPack Sidecar Signature",
+  "description": "Detached integrity verification file for MeshPack archives. Required because pack_hash cannot be computed and stored inside the archive itself.",
+  "type": "object",
+  "required": ["pack_name", "pack_size_bytes", "hash_algo", "pack_hash", "computed_at"],
+  "properties": {
+    "pack_name": {
+      "type": "string",
+      "description": "Filename of the associated .meshpack archive",
+      "pattern": "^.+\\.(meshpack|mpack)$"
+    },
+    "pack_size_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size of the .meshpack file in bytes, for quick sanity check"
+    },
+    "hash_algo": {
+      "type": "string",
+      "enum": ["sha256", "sha512", "blake3"],
+      "description": "Algorithm used to compute pack_hash"
+    },
+    "pack_hash": {
+      "type": "string",
+      "description": "The authoritative hash of the .meshpack archive bytes",
+      "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+    },
+    "computed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this sidecar was generated"
+    },
+    "exclusions": {
+      "type": "array",
+      "description": "List of ZIP entry paths excluded from hash computation (e.g., mapping.db)",
+      "items": { "type": "string" },
+      "default": ["mapping.db"]
+    },
+    "signatures": {
+      "type": "array",
+      "description": "Cryptographic signatures over pack_hash",
+      "items": {
+        "type": "object",
+        "required": ["alg", "public_key", "signature"],
+        "properties": {
+          "alg": {
+            "type": "string",
+            "enum": ["ed25519", "rsa-pss-sha256"],
+            "description": "Signature algorithm"
+          },
+          "public_key": {
+            "type": "string",
+            "description": "Base64-encoded public key"
+          },
+          "signature": {
+            "type": "string",
+            "description": "Base64-encoded signature over pack_hash string"
+          },
+          "signer_id": {
+            "type": "string",
+            "description": "Optional identifier of the signer (email, key ID, etc.)"
+          },
+          "signed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

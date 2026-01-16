@@ -4,7 +4,7 @@
   "title": "MeshPack Index Shard",
   "description": "Sharded file index containing a subset of file entries",
   "type": "object",
-  "required": ["shard_id", "format_version", "entries"],
+  "required": ["shard_id", "format_version", "entries", "entries_count", "entries_hash"],
   "properties": {
     "shard_id": {
       "type": "string"
@@ -13,8 +13,18 @@
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
+    "entries_hash": {
+      "type": "string",
+      "description": "Hash of the sorted entries array for integrity",
+      "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+    },
+    "entries_count": {
+      "type": "integer",
+      "minimum": 0
+    },
     "creator_info": {
       "type": "object",
+      "description": "DEPRECATED: For backwards compatibility only. New implementations SHOULD omit this and rely on manifest.creator_info. Will be removed in format_version 2.0.0.",
       "properties": {
         "name": { "type": "string" },
         "email": { "type": "string" }
@@ -36,6 +46,18 @@
           "type": "string",
           "description": "Relative path from root, POSIX separators"
         },
+        "ids": {
+          "type": "array",
+          "description": "Identifiers for this file in multiple namespaces (e.g., meshsync:model)",
+          "items": {
+            "type": "object",
+            "required": ["ns", "id"],
+            "properties": {
+              "ns": { "type": "string" },
+              "id": { "type": "string" }
+            }
+          }
+        },
         "original_name": { "type": "string" },
         "size_bytes": { "type": "integer", "minimum": 0 },
         "hash": { 
@@ -45,9 +67,43 @@
         "modified_at": { "type": "string", "format": "date-time" },
         "created_at": { "type": "string", "format": "date-time" },
         "mime_type": { "type": "string" },
+        "units": {
+          "type": "string",
+          "enum": ["mm", "cm", "m", "in", "ft", "unitless"]
+        },
+        "up_axis": {
+          "type": "string",
+          "enum": ["+Z", "-Z", "+Y", "-Y"]
+        },
+        "bounding_box": {
+          "type": "object",
+          "properties": {
+            "min": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "max": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
+        },
         "resource_ref": { 
             "type": ["string", "null"],
             "description": "If not null, corresponds to a file in resources/<hash>.<ext>"
+        },
+        "resource_hash": {
+          "type": "string",
+          "description": "Hash of the embedded resource file, if included",
+          "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+        },
+        "resource_size_bytes": {
+          "type": "integer",
+          "minimum": 0
         },
         "attributes": {
           "type": "object",
@@ -55,6 +111,41 @@
             "is_symlink": { "type": "boolean" },
             "is_hidden": { "type": "boolean" }
           }
+        },
+        "metamodel_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Metamodel this file belongs to"
+        },
+        "metamodel_role": {
+          "type": "string",
+          "enum": ["canonical", "variant", "accessory", "doc"]
+        },
+        "assembly": {
+          "type": "object",
+          "description": "Assembly graph info for placing this file. Transform is 4x4 column-major matrix, right-handed +Y up coordinate system.",
+          "properties": {
+            "assembly_id": { "type": "string", "format": "uuid" },
+            "parent_assembly_id": { "type": ["string", "null"], "format": "uuid" },
+            "role": { "type": "string", "enum": ["body", "support", "accessory", "texture", "doc"] },
+            "transform": {
+              "type": "object",
+              "description": "4x4 homogeneous transform matrix in column-major order (OpenGL/glTF convention)",
+              "properties": {
+                "matrix": {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 16,
+                  "maxItems": 16,
+                  "description": "Column-major 4x4 matrix: [m00,m10,m20,m30, m01,m11,m21,m31, m02,m12,m22,m32, m03,m13,m23,m33]"
+                }
+              }
+            }
+          }
+        },
+        "preview_ref": {
+          "type": "string",
+          "description": "Reference to preview thumbnail in resources/"
         },
         "extensions": {
           "type": "object",
