@@ -170,6 +170,11 @@ The `manifest.json` file is the entry point for the package. It defines the owne
 *   **`hash_algo` / `pack_hash`**: Required for integrity verification. **Important**: `pack_hash` is computed over the finalized archive bytes and MUST be distributed via a **detached sidecar file** (`<name>.meshpack.sig`) or transmitted out-of-band. The `pack_hash` field in `manifest.json` serves as a **placeholder** that is populated AFTER archive creation for reference purposes only. Verifiers MUST use the sidecar signature, not the embedded value.
 *   **`signatures`**: Optional signatures over `pack_hash` (e.g., ed25519) for authenticity.
 *   **`generation`**: Provenance (generator version, config flags, partial/resume markers, optional `base_pack_hash` for deltas).
+    *   **`metamodel_filter`** (v1.1+): Configurable export filter for metamodel context. Since models can belong to **multiple metamodels**, this specifies what was exported:
+        *   `mode: "all"` - Export all metamodel assignments (default)
+        *   `mode: "single"` + `metamodel_ids: ["uuid"]` - Export in context of one metamodel
+        *   `mode: "include"` / `mode: "exclude"` + `metamodel_ids: [...]` - Filter by list
+        *   `collapse_roles: true` - When mode=single, use only the role from that metamodel
 *   **`import_policy`**: Guidance for conflict handling when importing into another backend.
 *   **`extensions`**: A dictionary for storing non-standard metadata without breaking strict schema validation.
 
@@ -216,6 +221,12 @@ To handle libraries with hundreds of thousands of files without loading a monoli
             "is_symlink": false,
             "is_hidden": false
         },
+        // 1:N metamodel support (v1.1+): use metamodels[] array
+        "metamodels": [
+          { "id": "uuid-metamodel-1", "role": "canonical" },
+          { "id": "uuid-metamodel-2", "role": "canonical" }  // Same file, main in 2 kits
+        ],
+        // DEPRECATED: Single metamodel fields (v1.0 compatibility)
         "metamodel_id": "uuid-string",
         "metamodel_role": "canonical",
         "assembly": {
@@ -239,7 +250,8 @@ To handle libraries with hundreds of thousands of files without loading a monoli
 ### FileEntry Definition
 *   **`path`**: **Relative Path** from the root of the scanned directory. MUST NOT contain workspace ID or absolute system paths. MUST use forward slashes (`/`).
 *   **`ids`**: Namespaced identifiers for cross-system reconciliation (e.g., `meshsync:model`, `meshsync:metamodel`, `thingiverse:model`).
-*   **`metamodel_id` / `metamodel_role`**: Allows reconstituting grouping/metamodel relationships on import.
+*   **`metamodels`** (v1.1+): Array of metamodel memberships. A file CAN belong to **multiple metamodels simultaneously** (e.g., a generic wheel is `canonical` in both "Car Kit" and "Truck Kit"). Each entry specifies `id` and `role`. Supersedes the deprecated single fields when present.
+*   **`metamodel_id` / `metamodel_role`** (DEPRECATED): Legacy single-metamodel fields for v1.0 compatibility. If `metamodels[]` is present, these are ignored.
 *   **`assembly`**: Optional assembly graph info with transforms to render models in-place.
     *   **Transform Matrix Convention**: 4x4 homogeneous transformation matrix in **column-major order** (OpenGL/glTF convention). Coordinate system is **right-handed, +Y up**. Scale is in the units specified by the parent entry's `units` field. Transform is **relative to parent assembly**, not absolute world space.
 *   **`mime_type`, `units`, `up_axis`, `bounding_box`, `preview_ref`**: Make assets renderable locally without additional context.

@@ -116,7 +116,28 @@
         "config": { "type": "object", "additionalProperties": true },
         "resume_token": { "type": "string" },
         "partial": { "type": "boolean" },
-        "base_pack_hash": { "type": "string", "pattern": "^[a-z0-9]+:[a-f0-9]+$" }
+        "base_pack_hash": { "type": "string", "pattern": "^[a-z0-9]+:[a-f0-9]+$" },
+        "metamodel_filter": {
+          "type": "object",
+          "description": "Filter applied during export for metamodel context. Models can belong to multiple metamodels; this specifies which context was used for export.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["all", "include", "exclude", "single"],
+              "description": "all: export all metamodel assignments; include: only specified IDs; exclude: all except specified; single: export in context of one metamodel"
+            },
+            "metamodel_ids": {
+              "type": "array",
+              "items": { "type": "string", "format": "uuid" },
+              "description": "Metamodel IDs for include/exclude/single mode"
+            },
+            "collapse_roles": {
+              "type": "boolean",
+              "default": false,
+              "description": "If true and mode=single, use the role from the specified metamodel. If false, preserve all roles in metamodels[] array."
+            }
+          }
+        }
       }
     },
     "import_policy": {

@@ -120,11 +120,32 @@
         "metamodel_id": {
           "type": "string",
           "format": "uuid",
-          "description": "Metamodel this file belongs to"
+          "description": "DEPRECATED: Single metamodel ID. Use 'metamodels' array for 1:N support. Kept for backward compatibility; if both present, 'metamodels' takes precedence."
         },
         "metamodel_role": {
           "type": "string",
-          "enum": ["canonical", "variant", "accessory", "doc"]
+          "enum": ["canonical", "variant", "accessory", "doc"],
+          "description": "DEPRECATED: Use 'metamodels' array with per-assignment roles. Applies to metamodel_id if metamodels[] is absent."
+        },
+        "metamodels": {
+          "type": "array",
+          "description": "Array of metamodel memberships. A file can belong to multiple metamodels (e.g., shared component in multiple kits). Each entry specifies the metamodel and the role within it. Supersedes metamodel_id/metamodel_role when present.",
+          "items": {
+            "type": "object",
+            "required": ["id", "role"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Metamodel identifier"
+              },
+              "role": {
+                "type": "string",
+                "enum": ["canonical", "variant", "accessory", "doc"],
+                "description": "Role within this metamodel. A file CAN be 'canonical' in multiple metamodels."
+              }
+            }
+          }
         },
         "assembly": {
           "type": "object",
