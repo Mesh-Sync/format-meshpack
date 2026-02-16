@@ -7,7 +7,7 @@ tags:
 title: 'MeshPack (.meshpack) Standard Definition'
 status: draft
 created_date: 2026-01-06
-updated_date: 2026-01-16
+updated_date: 2026-02-16
 author: Jordane Masson
 business_value: high
 risk_level: medium
@@ -23,49 +23,76 @@ The `.meshpack` format is a standardized container format used within the Mesh-S
 This format is designed to be:
 - **Portable**: Can be moved across systems (with platform metadata).
 - **Scalable**: Supports massive file counts via index sharding.
-- **Verifiable**: Includes hashing for integrity capability.
+- **Verifiable**: Includes hashing for integrity and signatures for authenticity.
 - **Extensible**: Designed with forward-compatibility for future versioning.
+
+### 1.1 Notation Conventions
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
+
+### 1.2 Scope
+
+This specification defines two layers:
+1. **MeshPack Core** (Conformance Levels L1 + L2): The universal file format — any tool can implement this without knowledge of MeshSync.
+2. **MeshPack MeshSync Profile** (Conformance Level L3): MeshSync ecosystem-specific extensions, identity resolution, and worker pipeline integration.
 
 ## 2. File Format
 
 Physically, a `.meshpack` file is a **ZIP archive** with a custom extension.
 
-### Compression Policy
+### 2.1 Compression Policy
 - **REQUIRED**: All entries MUST use **DEFLATE** compression (ZIP method 8) or **STORE** (method 0) for maximum compatibility.
 - **PROHIBITED**: LZMA, Zstd, BZip2, or other compression methods that require extended ZIP features.
 - **Rationale**: Ensures every ZIP library can read MeshPack files without special decompressor support.
 
-### Extension
+### 2.2 ZIP Entry Ordering
+- The `manifest.json` entry MUST be the **first** entry in the ZIP central directory.
+- **Rationale**: Enables streaming readers to parse the manifest without seeking through arbitrarily large archives.
+
+### 2.3 Wire Format Requirements
+- All JSON files within the archive MUST be encoded in **UTF-8 without BOM**.
+- `_README.md` files MUST use **LF** line endings (not CRLF).
+- Archives larger than 4 GB or with more than 65,535 entries MUST use **ZIP64 extensions**.
+
+### 2.4 Extension
 - Primary: `.meshpack`
 - Alternative: `.mpack`
 
-### Future Consideration: PTAR Format
+### 2.5 Media Type
+- Recommended MIME type: `application/vnd.meshsync.meshpack+zip`
+- Implementations SHOULD register this type with the operating system for file association.
+
+### 2.6 Future Consideration: PTAR Format
 
 > **Note for v2.0 evaluation**: The [PTAR format](https://www.plakar.io/posts/2025-06-27/it-doesnt-make-sense-to-wrap-modern-data-in-a-1979-format-introducing-.ptar/) from [Plakar](https://github.com/PlakarKorp/plakar) addresses several limitations of ZIP for sync-heavy workloads:
 >
 > | Capability | ZIP | PTAR |
 > |------------|-----|------|
-> | Content-addressed deduplication | ❌ | ✅ |
-> | Native encryption (audited) | ❌ | ✅ |
-> | Streaming writes | ❌ | ✅ |
-> | Built-in tamper evidence (MAC) | ❌ | ✅ |
-> | Multiple snapshots/versions | ❌ | ✅ |
-> | Browser/WASM support | ✅ | ❌ |
+> | Content-addressed deduplication | No | Yes |
+> | Native encryption (audited) | No | Yes |
+> | Streaming writes | No | Yes |
+> | Built-in tamper evidence (MAC) | No | Yes |
+> | Multiple snapshots/versions | No | Yes |
+> | Browser/WASM support | Yes | No |
 >
 > **Why ZIP for v1.0**: Browser compatibility (JSZip), universal tooling, industry precedent (3MF, XLSX, JAR).
->
-> **References for future analysis**:
-> - PTAR specification: https://www.plakar.io/posts/2025-06-27/it-doesnt-make-sense-to-wrap-modern-data-in-a-1979-format-introducing-.ptar/
-> - Kloset immutable store: https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/
-> - Kapsul (PTAR tooling): https://github.com/PlakarKorp/kapsul
-> - CDC chunking: https://www.plakar.io/posts/2025-07-11/introducing-go-cdc-chunkers-chunk-and-deduplicate-everything/
-> - Crypto audit: https://www.plakar.io/posts/2025-02-28/audit-of-plakar-cryptography/
->
-> **Potential migration path**: Add `archive_profile: "ptar"` field in manifest for experimental streaming/sync profile, evaluate for v2.0 default if PTAR gains browser support.
 
 ## 3. Internal Structure
 
 A valid `.meshpack` archive MUST contain the following structure:
+
+```
+meshpack-archive  = manifest-entry index-dir [resources-dir] [mapping-db]
+manifest-entry    = "manifest.json"         ; MUST be first ZIP entry
+index-dir         = "index/" readme-file 1*shard-file
+shard-file        = "index/part-" 5DIGIT ".json"  ; 1-based, zero-padded
+resources-dir     = "resources/" readme-file *resource-file
+resource-file     = "resources/" hex-hash "." extension
+readme-file       = "_README.md"
+mapping-db        = "mapping.db"            ; OPTIONAL, EXCLUDED from hashing
+```
+
+Expanded layout:
 
 ```
 root/
@@ -73,19 +100,19 @@ root/
 ├── _README.md          # (Required) Explanation of content
 ├── index/              # (Required) Directory containing content shards
 │   ├── _README.md
-│   ├── part-001.json
-│   ├── part-002.json
+│   ├── part-00001.json
+│   ├── part-00002.json
 │   └── ...
 ├── resources/          # (Optional) Attached binaries/images
 │   ├── _README.md
-│   ├── <hash>.jpg
+│   ├── <hex-hash>.jpg  # Named WITHOUT algo prefix for Windows compat
 │   └── ...
 └── mapping.db          # (Optional, EXCLUDED from hashing) SQLite cache
 ```
 
-Each directory contains a `_README.md` file describing its purpose and strict usage rules, ensuring human readability when extracted.
+Each directory contains a `_README.md` file (underscore prefix forces sort-first ordering) describing its purpose, ensuring human readability when extracted.
 
-### Note on `mapping.db`
+### 3.1 Note on `mapping.db`
 
 The optional `mapping.db` SQLite file is a **local acceleration cache** for consumers. It is explicitly **EXCLUDED from integrity verification** because:
 - SQLite files are non-deterministic (page ordering, vacuum behavior varies by platform)
@@ -102,25 +129,25 @@ The optional `mapping.db` SQLite file is a **local acceleration cache** for cons
 
 The `manifest.json` file is the entry point for the package. It defines the ownership, global context, and processing rules.
 
-### JSON Schema
+### 4.1 JSON Schema
 
 ```json
 {
-  "format_version": "1.0.0", // SemVer of the .meshpack specification
+  "format_version": "1.0.0",
   "created_at": "2026-01-06T12:00:00Z",
-  "workspace_id": "uuid-string", // The workspace this snapshot belongs to
-  "ids": [                      // Namespaced identifiers for portability
+  "workspace_id": "uuid-string",
+  "ids": [
     { "ns": "meshsync:workspace", "id": "uuid-string" }
   ],
   "creator_info": {
      "name": "Jordane Masson",
      "email": "contact@meshsync.net"
   },
-  "license": "Proprietary", // License of the CONTENT, not the format
+  "license": "Proprietary",
   "platform_info": {
-    "os": "linux",              // "linux" | "windows" | "darwin"
-    "path_separator": "/",      // "/" or "\\"
-    "is_case_sensitive": true   // boolean
+    "os": "linux",
+    "path_separator": "/",
+    "is_case_sensitive": true
   },
   "index_summary": {
     "total_files": 15420,
@@ -128,11 +155,11 @@ The `manifest.json` file is the entry point for the package. It defines the owne
     "total_size_bytes": 104857600
   },
   "shard_list": [
-    { "id": "part-00001.json", "entries_count": 10000, "entries_hash": "sha256:..." }
+    { "id": "part-00001", "entries_count": 10000, "entries_hash": "sha256:..." }
   ],
   "hash_algo": "sha256",
-  "pack_hash": "sha256:<hash-of-zip>",           // Integrity across the whole archive
-  "signatures": [                                // Optional authentication over pack_hash
+  "pack_hash": "sha256:<hash-of-zip>",
+  "signatures": [
     { "alg": "ed25519", "public_key": "<base64>", "signature": "<base64>" }
   ],
   "generation": {
@@ -149,34 +176,38 @@ The `manifest.json` file is the entry point for the package. It defines the owne
     "metamodel_merge": "strict",
     "strip_creator_info": false
   },
-  "extensions": {               // Reserved for future use
-     "custom_plugin_data": {}
-  }
+  "extensions": {}
 }
 ```
 
-### Fields Description
+### 4.2 Fields Description
 
-*   **`format_version`**: Semantic versioning of the `.meshpack` format itself. Parsers should use this to determine compatibility.
-*   **`creator_info`**: Details about the entity that generated this pack.
-*   **`license`**: License applicable to the files *referenced* in this pack.
-*   **`workspace_id`**: **Scope Context**. The Manifest holds the workspace identity so that individual file entries remain portable and context-agnostic.
+*   **`format_version`** (REQUIRED): Semantic versioning of the `.meshpack` format. Parsers MUST check the major version for compatibility.
+*   **`created_at`** (REQUIRED): ISO 8601 UTC timestamp of pack creation.
+*   **`creator_info`** (REQUIRED): Details about the entity that generated this pack. **PII Note**: The `email` field may contain personal data. Generators SHOULD allow anonymizing or hashing this field for public distribution.
+*   **`license`**: License applicable to the files *referenced* in this pack. SHOULD use [SPDX expression syntax](https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions/) (e.g., `MIT`, `Apache-2.0`, `CC-BY-4.0`). Use `Proprietary` for non-open-source content, `LicenseRef-<id>` for custom licenses, or `null` if unknown.
+*   **`workspace_id`**: **Scope Context**. If present, MUST match `ids[ns="meshsync:workspace"].id`. Required for MeshSync ecosystem (L3), optional for standalone use (may be `null`).
 *   **`ids`**: Namespaced identifiers (`ns` + `id`) so different systems can recognize the workspace/library.
-*   **`platform_info`**: CRITICAL for cross-platform processing.
-    *   **`os`**: Source operating system.
-    *   **`path_separator`**: Separator used in the *original* file system (for reference only).
+*   **`platform_info`** (REQUIRED): CRITICAL for cross-platform processing.
+    *   **`os`**: Source operating system (`linux` | `windows` | `darwin` | `unknown`).
+    *   **`path_separator`**: Separator used in the *original* file system (for reference only; paths in shards always use `/`).
     *   **`is_case_sensitive`**: Hints if `Logo.png` and `logo.png` should be treated as distinct files.
-*   **`shard_list`**: Canonical ordering of shards with per-shard hashes for deterministic loading.
-*   **`hash_algo` / `pack_hash`**: Required for integrity verification. **Important**: `pack_hash` is computed over the finalized archive bytes and MUST be distributed via a **detached sidecar file** (`<name>.meshpack.sig`) or transmitted out-of-band. The `pack_hash` field in `manifest.json` serves as a **placeholder** that is populated AFTER archive creation for reference purposes only. Verifiers MUST use the sidecar signature, not the embedded value.
-*   **`signatures`**: Optional signatures over `pack_hash` (e.g., ed25519) for authenticity.
-*   **`generation`**: Provenance (generator version, config flags, partial/resume markers, optional `base_pack_hash` for deltas).
-    *   **`metamodel_filter`** (v1.1+): Configurable export filter for metamodel context. Since models can belong to **multiple metamodels**, this specifies what was exported:
-        *   `mode: "all"` - Export all metamodel assignments (default)
-        *   `mode: "single"` + `metamodel_ids: ["uuid"]` - Export in context of one metamodel
-        *   `mode: "include"` / `mode: "exclude"` + `metamodel_ids: [...]` - Filter by list
-        *   `collapse_roles: true` - When mode=single, use only the role from that metamodel
+*   **`index_summary`** (REQUIRED): Aggregate statistics. `total_files` MUST equal the sum of all `shard_list[].entries_count`.
+*   **`shard_list`** (REQUIRED): Canonical ordering of shards with per-shard hashes for deterministic loading. Shard IDs use 5-digit zero-padding (`part-00001`).
+*   **`hash_algo`** (REQUIRED): One of `sha256`, `sha512`, `blake3`. Applies to `pack_hash`, `entries_hash`, file hashes, and resource hashes. Implementations SHOULD default to `sha256` for maximum compatibility.
+*   **`pack_hash`**: **REFERENCE value only**. See §8 for the sidecar-based verification model. Populated after archive creation for informational purposes. Verifiers MUST NOT use this value for integrity checks.
+*   **`signatures`**: Informational signatures in manifest; authoritative signatures are in the sidecar (§8.2).
+*   **`generation`**: Provenance metadata.
+    *   **`generator`**: Tool name and version.
+    *   **`config`**: Configuration flags used during generation.
+    *   **`partial`**: `true` for delta packs (see §11).
+    *   **`base_pack_hash`**: Required when `partial=true`; the base pack this delta applies to.
+    *   **`metamodel_filter`** (v1.1+): Export filter for metamodel context. See schema for `mode`, `metamodel_ids`, `collapse_roles`.
 *   **`import_policy`**: Guidance for conflict handling when importing into another backend.
-*   **`extensions`**: A dictionary for storing non-standard metadata without breaking strict schema validation.
+    *   **`id_conflict`**: `fail` | `skip` | `overwrite`
+    *   **`metamodel_merge`**: `strict` | `merge` | `replace`
+    *   **`strip_creator_info`**: If `true`, importer should remove creator_info.
+*   **`extensions`**: A dictionary for storing non-standard metadata. Keys MUST use namespace prefixes (see EXTENSIONS.md).
 
 ---
 
@@ -184,23 +215,20 @@ The `manifest.json` file is the entry point for the package. It defines the owne
 
 To handle libraries with hundreds of thousands of files without loading a monolithic JSON into memory, the file list is split into multiple shards.
 
-### Sharding Strategy
-- Files are distributed across `part-XXXXX.json` files (1-based, zero-padded).
+### 5.1 Sharding Strategy
+- Files are distributed across `part-XXXXX.json` files (1-based, **5-digit zero-padded**).
 - Shards are **Objects**, not Arrays, to allow for shard-specific metadata.
 - The consumer MUST read ALL shards to build a complete view of the package.
 - **Deterministic ordering**: entries are sorted by `path` (UTF-8, byte order) before sharding.
-- **Shard limits**: recommended max 10k entries or 5 MB per shard (whichever comes first).
-- Each shard records `entries_count` and `entries_hash` (hash over the sorted `entries` array).
+- **Shard limits**: MUST NOT exceed **10,000 entries** per shard. SHOULD NOT exceed 5 MB per shard.
+- Each shard records `entries_count` and `entries_hash` (hash computed per §8.5).
 
-### Shard JSON Schema
+### 5.2 Shard JSON Schema
 
 ```json
 {
-  "shard_id": "part-001",
+  "shard_id": "part-00001",
   "format_version": "1.0.0",
-  "creator_info": {             // DEPRECATED: For backwards compat only. Omit in new implementations.
-     "name": "Jordane Masson"
-  },
   "entries_count": 10000,
   "entries_hash": "sha256:...",
   "entries": [
@@ -214,21 +242,17 @@ To handle libraries with hundreds of thousands of files without loading a monoli
           { "ns": "meshsync:model", "id": "uuid-string" },
           { "ns": "thingiverse:model", "id": "12345" }
         ],
-        "resource_ref": null,   // null or hash if included in resources/
-        "resource_hash": null,  // hash of embedded blob, if present
-        "resource_size_bytes": 2048,
+        "resource_ref": null,
+        "resource_hash": null,
+        "resource_size_bytes": null,
         "attributes": {
             "is_symlink": false,
             "is_hidden": false
         },
-        // 1:N metamodel support (v1.1+): use metamodels[] array
         "metamodels": [
           { "id": "uuid-metamodel-1", "role": "canonical" },
-          { "id": "uuid-metamodel-2", "role": "canonical" }  // Same file, main in 2 kits
+          { "id": "uuid-metamodel-2", "role": "canonical" }
         ],
-        // DEPRECATED: Single metamodel fields (v1.0 compatibility)
-        "metamodel_id": "uuid-string",
-        "metamodel_role": "canonical",
         "assembly": {
             "assembly_id": "uuid-string",
             "parent_assembly_id": null,
@@ -239,47 +263,58 @@ To handle libraries with hundreds of thousands of files without loading a monoli
         "units": "mm",
         "up_axis": "+Z",
         "bounding_box": { "min": [0,0,0], "max": [10,5,3] },
-        "preview_ref": "sha256:...jpg",
-        "extensions": {}        // Per-file extensibility
-      },
-      ...
-  ] 
+        "preview_ref": "abc123def456.jpg",
+        "extensions": {}
+      }
+  ]
 }
 ```
 
-### FileEntry Definition
-*   **`path`**: **Relative Path** from the root of the scanned directory. MUST NOT contain workspace ID or absolute system paths. MUST use forward slashes (`/`).
-*   **`ids`**: Namespaced identifiers for cross-system reconciliation (e.g., `meshsync:model`, `meshsync:metamodel`, `thingiverse:model`).
-*   **`metamodels`** (v1.1+): Array of metamodel memberships. A file CAN belong to **multiple metamodels simultaneously** (e.g., a generic wheel is `canonical` in both "Car Kit" and "Truck Kit"). Each entry specifies `id` and `role`. Supersedes the deprecated single fields when present.
+### 5.3 FileEntry Definition
+
+*   **`path`** (REQUIRED): **Relative path** from the root of the scanned directory. MUST use forward slashes (`/`). MUST NOT contain `..`, absolute paths, or drive letters. MUST NOT exceed **1024 characters**.
+*   **`original_name`** (REQUIRED): Original filename preserving case.
+*   **`size_bytes`** (REQUIRED): File size from filesystem.
+*   **`hash`** (REQUIRED): Content hash of the **original file on the source filesystem** using manifest's `hash_algo`. Format: `{algo}:{hex}`.
+*   **`modified_at`** (REQUIRED): ISO 8601 timestamp of last modification.
+*   **`ids`**: Namespaced identifiers for cross-system reconciliation (e.g., `meshsync:model`, `thingiverse:thing`).
+*   **`metamodels`** (v1.1+): Array of metamodel memberships. A file CAN belong to **multiple metamodels simultaneously**. Each entry specifies `id` (UUID) and `role` (`canonical` | `variant` | `accessory` | `doc`). Supersedes the deprecated single fields when present.
 *   **`metamodel_id` / `metamodel_role`** (DEPRECATED): Legacy single-metamodel fields for v1.0 compatibility. If `metamodels[]` is present, these are ignored.
-*   **`assembly`**: Optional assembly graph info with transforms to render models in-place.
-    *   **Transform Matrix Convention**: 4x4 homogeneous transformation matrix in **column-major order** (OpenGL/glTF convention). Coordinate system is **right-handed, +Y up**. Scale is in the units specified by the parent entry's `units` field. Transform is **relative to parent assembly**, not absolute world space.
-*   **`mime_type`, `units`, `up_axis`, `bounding_box`, `preview_ref`**: Make assets renderable locally without additional context.
-*   **`resource_ref`**: If the actual file content is included in the `.meshpack` (e.g. usage for thumbnails or small text files), this field contains the filename in the `resources/` folder (format: `<hash>.<ext>`).
-*   **`resource_hash` / `resource_size_bytes`**: Integrity for embedded blobs. **Clarification**: `hash` refers to the content hash of the **original file on the source filesystem**. `resource_hash` refers to the hash of the **embedded blob in resources/**. These SHOULD be identical if the file was embedded without transformation. They MAY differ if the embedded resource is a derivative (e.g., compressed thumbnail).
-*   **`extensions`**: Allows tagging files with extra data (e.g. "preview_generated": true) without altering the core schema.
+*   **`assembly`**: Optional assembly graph info with transforms.
+    *   **Transform Matrix Convention**: 4×4 homogeneous transformation matrix in **column-major order** (OpenGL/glTF convention). All transforms use the **canonical coordinate system: right-handed, +Y up**. If the source file uses a different `up_axis` (e.g., +Z for STL), the transform MUST be pre-converted to canonical +Y up. Scale is in the units specified by the entry's `units` field. Transform is **relative to parent assembly**, not absolute world space.
+*   **`operation`**: Delta pack operation type (`add` | `modify` | `delete`). Only present when `manifest.generation.partial=true`. `delete` entries MUST have `size_bytes=0` and `hash` set to all zeros. Supersedes the deprecated `extensions._deleted` marker.
+*   **`mime_type`**: MIME type of the file (e.g., `model/stl`, `model/gltf-binary`).
+*   **`units`**: Measurement units (`mm` | `cm` | `m` | `in` | `ft` | `unitless`).
+*   **`up_axis`**: Source model's up-axis orientation (`+Z` | `-Z` | `+Y` | `-Y`).
+*   **`bounding_box`**: Axis-aligned bounding box in the **source** file's coordinate system. Units are inherited from the sibling `units` field.
+*   **`resource_ref`**: Reference to embedded file in `resources/` folder. Format: `{hex_hash}.{ext}` (**no algorithm prefix** — the algorithm is implicit from `manifest.hash_algo`). No colons in filenames for Windows compatibility.
+*   **`resource_hash` / `resource_size_bytes`**: Integrity for embedded blobs. `hash` refers to the **original file**; `resource_hash` refers to the **embedded blob**. These SHOULD be identical unless the resource is a derivative (e.g., compressed thumbnail).
+*   **`preview_ref`**: Reference to preview thumbnail in `resources/` (format: `{hex_hash}.{ext}`).
+*   **`extensions`**: Allows tagging files with extra data. Keys MUST use namespace prefixes (see EXTENSIONS.md).
 
 ---
 
 ## 6. Resources Folder (`resources/`)
 
-If configured, the `.meshpack` may contain actual file content, not just metadata. 
+If configured, the `.meshpack` may contain actual file content, not just metadata.
 
-### Flattening Strategy
-*   To avoid directory depth issues and path collisions, all files in `resources/` are **flattened**.
-*   **Naming Convention**: `<SHA256-HASH>.<EXTENSION>` (e.g., `e3b0c44...855.jpg`).
-*   **Linking**: The `FileEntry` in the index links to this file via the `resource_ref` field (which stores the hash) or implicitly if the `hash` matches.
+### 6.1 Flattening Strategy
+*   All files in `resources/` are **flattened** (no subdirectories).
+*   **Naming Convention**: `<HEX-HASH>.<EXTENSION>` (e.g., `e3b0c44298fc1c149...855.jpg`). Note: **NO algorithm prefix** in the filename — the algorithm is implicit from `manifest.hash_algo`. This avoids colons in filenames (illegal on Windows).
+*   **Linking**: The `FileEntry` links to this file via the `resource_ref` field.
 
-**Usage Rules**:
-*   Should only be used for small files (thumbnails, licenses, READMEs) to keep the `.meshpack` portable.
-*   The `_README.md` in this folder must explain exactly what filtering logic was used to decide which files to include.
-*   Every embedded file must have its `hash` and `size_bytes` captured in the corresponding `FileEntry` (`resource_hash`, `resource_size_bytes`).
+### 6.2 Usage Rules
+*   SHOULD only be used for small files (thumbnails, licenses, READMEs) to keep the `.meshpack` portable. RECOMMENDED maximum individual file size: **512 KB**. RECOMMENDED total `resources/` budget: **50 MB**.
+*   The `_README.md` in this folder MUST explain what filtering logic was used to decide which files to include.
+*   Every embedded file MUST have its `resource_hash` and `resource_size_bytes` captured in the corresponding `FileEntry`.
 
 ---
 
 ## 7. Documentation Requirements
 
 To ensure the `.meshpack` is self-describing, the following `_README.md` files are mandatory:
+
+> **Note**: Files are prefixed with `_` to force sort-first ordering in file browsers and `ls` output.
 
 1.  **`/_README.md`**:
     *   "This MeshPack was generated by [Creator] on [Date]. It contains metadata for [WorkspaceID]."
@@ -291,9 +326,8 @@ To ensure the `.meshpack` is self-describing, the following `_README.md` files a
 
 3.  **`/resources/_README.md`** (If folder exists):
     *   "This directory contains flattened file content."
-    *   "Files are named by their SHA-256 hash."
+    *   "Files are named by their hex hash (algorithm: [sha256|sha512|blake3])."
     *   "Included types: [.jpg, .png, .txt]."
-    *   "Hash algorithm used: [sha256|sha512|blake3]."
 
 ## 8. Integrity & Authentication
 
@@ -304,9 +338,11 @@ Computing a hash of an archive and storing it *inside* the archive is logically 
 | File | Contents |
 |------|----------|
 | `library.meshpack` | The archive itself (manifest contains placeholder `pack_hash`) |
-| `library.meshpack.sig` | Detached sidecar with authoritative hash and signatures |
+| `library.meshpack.integrity` | Detached sidecar with authoritative hash and signatures |
 
-### 8.2 Sidecar File Format (`*.meshpack.sig`)
+### 8.2 Sidecar File Format (`*.meshpack.integrity`)
+
+> **Note**: The `.integrity` extension is used instead of `.sig` to avoid confusion with PGP/GPG detached signature files (which use `.sig` for binary output).
 
 ```json
 {
@@ -315,12 +351,14 @@ Computing a hash of an archive and storing it *inside* the archive is logically 
   "hash_algo": "sha256",
   "pack_hash": "sha256:a1b2c3d4...",
   "computed_at": "2026-01-16T12:00:00Z",
+  "exclusions": ["mapping.db"],
   "signatures": [
     {
       "alg": "ed25519",
       "public_key": "base64...",
       "signature": "base64...",
-      "signer_id": "agent@meshsync.net"
+      "signer_id": "agent@meshsync.net",
+      "signed_at": "2026-01-16T12:00:01Z"
     }
   ]
 }
@@ -328,29 +366,47 @@ Computing a hash of an archive and storing it *inside* the archive is logically 
 
 ### 8.3 Verification Algorithm
 
-1. Compute hash of `library.meshpack` bytes using `hash_algo`
-2. Compare against `pack_hash` in `.sig` file (NOT the embedded manifest value)
-3. If signatures present, verify each against `pack_hash`
-4. For each shard: compute hash of sorted `entries` array, compare against `shard_list[].entries_hash`
+1. Read sidecar file (`library.meshpack.integrity`)
+2. Quick sanity: compare `pack_size_bytes` against actual archive size
+3. Compute hash of `library.meshpack` bytes, **excluding** entries listed in `exclusions` (e.g., `mapping.db`)
+4. Compare computed hash against `pack_hash` in the **sidecar** (NOT the embedded manifest value)
+5. If signatures present, verify each against `pack_hash`
+6. For each shard: compute hash of canonical JSON of sorted `entries` array, compare against `shard_list[].entries_hash`
+
+**IMPORTANT**: Verifiers MUST use the sidecar for `pack_hash` verification. The `manifest.pack_hash` value is informational only.
 
 ### 8.4 Hash Exclusions
 
 The following MUST be excluded from `pack_hash` computation:
 - `mapping.db` (non-deterministic SQLite)
 
-### 8.5 Additional Integrity
+### 8.5 Shard Hash Computation (Canonical JSON)
 
-* **Shard hashes**: Each shard exposes `entries_hash` over the sorted `entries` array; manifest lists them in `shard_list` for verification.
-* **Encryption**: If used, record `encryption.alg` and `recipients`. Avoid mixing encrypted resources with plaintext indices.
+The `entries_hash` for each shard is computed as:
+
+```
+entries_hash = hash(canonical_json(sorted(entries)))
+```
+
+Where canonical JSON follows [RFC 8785 (JSON Canonicalization Scheme)](https://www.rfc-editor.org/rfc/rfc8785):
+1. `sorted(entries)` = entries sorted by `path` (UTF-8 byte order)
+2. `canonical_json()` = JCS canonicalization: keys sorted, no whitespace, UTF-8, numbers per RFC 8259 §6 (no NaN/Infinity, integers without decimal point)
+3. `hash()` = Algorithm from `manifest.hash_algo`
+4. Format: `{algorithm}:{lowercase_hex}` (e.g., `sha256:a1b2c3...`)
+
+### 8.6 Additional Integrity
+
+* **Shard hashes**: Each shard exposes `entries_hash`; manifest lists them in `shard_list` for cross-verification.
+* **Encryption**: Deferred to v1.1. When specified, it will be an official extension (`meshsync_encryption`) with algorithm, recipients, and encrypted-content scope. **Do not mix encrypted resources with plaintext indices.**
 
 ## 9. Usage Scenarios
 
 ### 9.1. Local Storage Agent
 The `plugin-storage-localfilesystem` generates `.meshpack` files during its "Scan" phase.
 1.  **Scan**: Walk directory, calculate hashes.
-2.  **Pack**: Stream entries into `index/part-XXX.json` object arrays inside the ZIP.
+2.  **Pack**: Stream entries into `index/part-XXXXX.json` shards inside the ZIP. `manifest.json` is written first.
 3.  **Embed**: If config `include_thumbnails=true`, copy relevant files to `resources/` and link in `FileEntry`.
-4.  **Deploy**: The `.meshpack` file is ready.
+4.  **Sidecar**: Compute `pack_hash` of finalized archive, write `.meshpack.integrity` file.
 
 ### 9.2. Heuristic Analysis
 A separate "Heuristic Engine" can mount this package. Because it is read-only and structured:
@@ -359,14 +415,21 @@ A separate "Heuristic Engine" can mount this package. Because it is read-only an
 
 ### 9.3. Backend Export / Import
 - Exporters SHOULD populate `ids` with `meshsync:*` namespaces, metamodel/assembly fields, and sign `pack_hash`.
-- Importers SHOULD verify `pack_hash`, `entries_hash`, and signatures before ingesting.
-- Conflict handling SHOULD respect `import_policy` (`id_conflict`, `metamodel_merge`, `strip_creator_info`).
+- Importers SHOULD verify `pack_hash` via sidecar, `entries_hash` per shard, and signatures before ingesting.
+- Conflict handling SHOULD respect `import_policy`:
+  - `id_conflict`: `fail` | `skip` | `overwrite`
+  - `metamodel_merge`: `strict` | `merge` | `replace`
+  - `strip_creator_info`: boolean
 
 ## 10. Security & Privacy
 
 *   **Metadata Leakage**: Users must understand that `index/` reveals their folder names and hierarchy.
-*   **Creator Info**: The `creator_info` field allows tracing the source of the package (e.g. "My Laptop Agent") but might contain PII (email). Agents should allow anonymizing this.
+*   **Creator Info**: The `creator_info` field allows tracing the source of the package but may contain PII (email). Generators SHOULD allow:
+    - Hashing the email (e.g., `sha256:abc123...@redacted`)
+    - Omitting the email entirely
+    - Using a pseudonym instead of real name
 *   **Safe Parsing**: Consumers of `.meshpack` MUST validate `format_version` before parsing to avoid incompatible schema structure issues.
+*   **Path Traversal**: All `path` values MUST be validated to reject `..`, absolute paths, and drive letters (see REQ-L1-013).
 
 ---
 
@@ -374,30 +437,32 @@ A separate "Heuristic Engine" can mount this package. Because it is read-only an
 
 For synchronization scenarios, `.meshpack` supports **delta packs** that reference a base pack.
 
-### Delta Pack Structure
+### 11.1 Delta Pack Structure
 
 A delta pack MUST set `generation.partial = true` and `generation.base_pack_hash` to the hash of the base pack.
 
-### Delta Entry Semantics
+### 11.2 Delta Entry Semantics
 
-Each `FileEntry` in a delta pack includes an implicit or explicit **operation**:
+Each `FileEntry` in a delta pack includes an explicit `operation` field:
 
-| Scenario | Representation |
-|----------|----------------|
-| **New file** | Entry present, no matching `path` in base pack |
-| **Modified file** | Entry present, `hash` differs from base pack entry with same `path` |
-| **Deleted file** | Entry with `"_deleted": true` in `extensions` field |
-| **Unchanged** | Entry NOT present (inherited from base) |
+| Operation | `operation` value | Representation |
+|-----------|-------------------|----------------|
+| **New file** | `"add"` | Full entry with all fields |
+| **Modified file** | `"modify"` | Full entry with updated `hash` |
+| **Deleted file** | `"delete"` | Entry with `size_bytes=0`, hash all zeros |
+| **Unchanged** | *(not present)* | Entry NOT present (inherited from base) |
 
-### Merge Algorithm
+> **DEPRECATED**: The `extensions._deleted: true` marker from v1.0 is superseded by `operation: "delete"`. Implementations SHOULD accept both for backwards compatibility.
+
+### 11.3 Merge Algorithm
 
 1. Load base pack entries into a map keyed by `path`
 2. For each entry in delta pack:
-   - If `extensions._deleted == true`: Remove from map
+   - If `operation == "delete"`: Remove from map
    - Otherwise: Upsert into map (add or replace)
 3. Result map represents the merged state
 
-### Constraints
+### 11.4 Constraints
 
 - Delta packs SHOULD NOT contain `resources/` for deleted files
 - A delta pack without a resolvable `base_pack_hash` is **invalid**
@@ -407,47 +472,78 @@ Each `FileEntry` in a delta pack includes an implicit or explicit **operation**:
 
 ## 12. 3D Asset Metadata (Extended)
 
-For 3D model entries, the following optional fields provide richer context:
+For 3D model entries, the following optional fields provide richer context. All are defined as official extensions with versioned envelopes (see EXTENSIONS.md).
 
-### Geometry Metadata
+### 12.1 Geometry Metadata
 
-Add to `FileEntry.extensions` under namespace `meshsync_geometry`:
+Extension: `meshsync_geometry.v1`
 
 ```json
 "extensions": {
   "meshsync_geometry": {
-    "vertex_count": 15420,
-    "face_count": 30000,
-    "edge_count": 45000,
-    "is_manifold": true,
-    "is_watertight": true,
-    "has_normals": true,
-    "has_uvs": false
+    "v1": {
+      "vertex_count": 15420,
+      "face_count": 30000,
+      "edge_count": 45000,
+      "is_manifold": true,
+      "is_watertight": true,
+      "has_normals": true,
+      "has_uvs": false
+    }
   }
 }
 ```
 
-### Material & Texture Dependencies
+### 12.2 Material & Texture Dependencies
+
+Extension: `meshsync_dependencies.v1`
 
 ```json
 "extensions": {
   "meshsync_dependencies": {
-    "materials": ["materials/chrome.mtl"],
-    "textures": ["textures/diffuse.png", "textures/normal.png"]
+    "v1": {
+      "materials": ["materials/chrome.mtl"],
+      "textures": ["textures/diffuse.png", "textures/normal.png"]
+    }
   }
 }
 ```
 
-### Print-Specific Metadata
+### 12.3 Print-Specific Metadata
+
+Extension: `meshsync_printability.v1`
 
 ```json
 "extensions": {
   "meshsync_printability": {
-    "estimated_print_time_minutes": 240,
-    "estimated_filament_grams": 45,
-    "recommended_layer_height_mm": 0.2,
-    "requires_supports": true,
-    "optimal_orientation": [0, 0, 1]
+    "v1": {
+      "printability_score": 0.85,
+      "is_watertight": true,
+      "requires_supports": true,
+      "optimal_orientation": [0, 0, 1],
+      "bounding_box_mm": [120, 80, 45],
+      "fdm": { "estimated_print_time_minutes": 240 },
+      "sla": { "estimated_resin_ml": 25.5 }
+    }
+  }
+}
+```
+
+### 12.4 AI-Enriched Content Metadata
+
+Extension: `meshsync_content.v1`
+
+```json
+"extensions": {
+  "meshsync_content": {
+    "v1": {
+      "ai_generated_title": "Articulated Dragon Figurine",
+      "ai_generated_description": "A detailed...",
+      "ai_generated_tags": ["dragon", "fantasy"],
+      "language": "en",
+      "ai_model_version": "gpt-4o-2024-01",
+      "generation_timestamp": "2026-01-16T12:00:00Z"
+    }
   }
 }
 ```
@@ -459,9 +555,12 @@ Add to `FileEntry.extensions` under namespace `meshsync_geometry`:
 | Term | Definition |
 |------|------------|
 | **Metamodel** | A logical grouping of related files representing a single 3D asset (e.g., STL + textures + license) |
-| **Assembly** | A hierarchical composition of metamodels with spatial transforms |
+| **Assembly** | A hierarchical composition of metamodels with spatial transforms in canonical +Y up space |
 | **Shard** | A JSON file containing a subset of the total file entries for memory efficiency |
 | **Delta Pack** | An incremental `.meshpack` containing only changes relative to a base pack |
+| **Sidecar** | A detached `.meshpack.integrity` file containing the authoritative pack hash and signatures |
+| **Canonical JSON** | JSON serialized per RFC 8785 (JCS) for deterministic hashing |
+| **SPDX** | Software Package Data Exchange — standard for license identifiers |
 
 ---
 
@@ -471,16 +570,21 @@ Add to `FileEntry.extensions` under namespace `meshsync_geometry`:
 - Parse `manifest.json` and all shards
 - Validate `format_version` compatibility
 - Iterate file entries
+- Reject path traversal attacks
 
 ### Level 2: Standard (Reader/Writer)
 - All of Level 1
-- Verify `entries_hash` for each shard
-- Verify `pack_hash` via sidecar
-- Generate valid packs with correct hashing
+- Generate valid packs with `manifest.json` as first ZIP entry
+- Verify `entries_hash` for each shard (RFC 8785 canonical JSON)
+- Verify `pack_hash` via sidecar (NOT manifest value)
+- Resource embedding with content-addressed naming (no algo prefix)
+- 5-digit zero-padded shard IDs
 
-### Level 3: Full (Ecosystem)
+### Level 3: Full (MeshSync Ecosystem)
 - All of Level 2
 - Support `ids` namespace resolution
-- Support `assembly` transforms
-- Support delta pack merge
+- Support `assembly` transforms (canonical +Y up)
+- Support delta pack merge with `operation` field
 - Signature verification
+- `workspace_id` consistency with `ids` array
+- Import policy enforcement

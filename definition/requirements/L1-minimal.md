@@ -70,7 +70,7 @@ Implementations MUST validate the presence of the following required fields in `
 **Type**: MUST
 **Testable**: Yes
 
-Implementations MUST read all shards listed in `manifest.json#shard_list` from the `index/` directory. Shards are named `part-XXXXX.json` (1-based, zero-padded to 5 digits).
+Implementations MUST read all shards listed in `manifest.json#shard_list` from the `index/` directory. Shards are named `part-XXXXX.json` (1-based, **5-digit** zero-padded, e.g., `part-00001.json`).
 
 **Rationale**: Complete file enumeration requires all shards.
 
@@ -110,10 +110,10 @@ Each `FileEntry` in `entries` array MUST contain:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `path` | string | Relative path from root, POSIX separators (`/`) |
+| `path` | string | Relative path from root, POSIX separators (`/`), max 1024 chars |
 | `original_name` | string | Original filename (may differ from path basename) |
 | `size_bytes` | integer | File size in bytes |
-| `hash` | string | Content hash in format `{algo}:{hex}` |
+| `hash` | string | Content hash in format `{algo}:{hex}` where algo matches `manifest.hash_algo` |
 | `modified_at` | string | ISO 8601 datetime of last modification |
 
 **Rationale**: Minimum data required to identify and locate files.
@@ -133,8 +133,9 @@ Implementations MUST:
 2. Reject paths containing `..` (parent directory traversal)
 3. Reject absolute paths (starting with `/` or drive letter)
 4. Handle both case-sensitive and case-insensitive matching based on `platform_info.is_case_sensitive`
+5. Reject paths exceeding 1024 characters
 
-**Rationale**: Security and cross-platform compatibility.
+**Rationale**: Security, cross-platform compatibility, and filesystem limit protection.
 
 **Verification**: 
 1. Path `vehicles/car.stl` → valid

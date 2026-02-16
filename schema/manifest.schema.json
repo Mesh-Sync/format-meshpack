@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://meshsync.net/schemas/meshpack/manifest.json",
   "title": "MeshPack Manifest",
-  "description": "Root metadata for MeshPack archive",
+  "description": "Root metadata for MeshPack archive. See common.schema.json for shared definitions.",
   "type": "object",
   "required": [
     "format_version",
@@ -26,10 +26,11 @@
     "workspace_id": {
       "type": ["string", "null"],
       "format": "uuid",
-      "description": "Optional workspace context. Required for MeshSync ecosystem, optional for standalone use."
+      "description": "Optional workspace context. Required for MeshSync ecosystem (REQ-L3-003), optional for standalone use. If present, MUST match the id in ids[ns='meshsync:workspace']."
     },
     "creator_info": {
       "type": "object",
+      "description": "Entity that generated the pack. PII note: email may contain personal data — consider redacting for public distribution.",
       "required": ["name"],
       "properties": {
         "name": { "type": "string" },
@@ -37,13 +38,14 @@
       }
     },
     "license": {
-      "type": ["string", "null"]
+      "type": ["string", "null"],
+      "description": "License of the CONTENT (not the format). SHOULD use SPDX expression syntax (e.g., 'MIT', 'Apache-2.0', 'CC-BY-4.0'). Use 'Proprietary' for non-open-source content, 'LicenseRef-<id>' for custom licenses, or null if unknown."
     },
     "platform_info": {
       "type": "object",
       "required": ["os", "path_separator", "is_case_sensitive"],
       "properties": {
-        "os": { 
+        "os": {
           "type": "string",
           "enum": ["linux", "windows", "darwin", "unknown"]
         },
@@ -54,23 +56,28 @@
     "hash_algo": {
       "type": "string",
       "enum": ["sha256", "sha512", "blake3"],
-      "description": "Algorithm used for pack_hash and shard/resource hashes"
+      "description": "Algorithm used for pack_hash and all shard/resource hashes. Implementations SHOULD default to sha256 for maximum compatibility."
     },
     "pack_hash": {
       "type": "string",
-      "description": "IMPORTANT: This is a REFERENCE value only. The authoritative pack_hash MUST be distributed via a detached sidecar file (<name>.meshpack.sig) because the hash cannot be computed until after the archive is finalized. Verifiers MUST use the sidecar, not this embedded value.",
-      "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+      "description": "REFERENCE value only. The authoritative pack_hash MUST be distributed via a detached sidecar file (<name>.meshpack.integrity). Verifiers MUST use the sidecar, not this embedded value. This field is populated after archive creation for informational purposes.",
+      "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
     },
     "signatures": {
       "type": "array",
-      "description": "Optional signatures over pack_hash",
+      "description": "Optional signatures over pack_hash. Informational only in manifest — authoritative signatures are in the sidecar.",
       "items": {
         "type": "object",
         "required": ["alg", "public_key", "signature"],
         "properties": {
-          "alg": { "type": "string", "enum": ["ed25519", "rsa-pss-sha256"] },
+          "alg": {
+            "type": "string",
+            "enum": ["ed25519", "rsa-pss-sha256"]
+          },
           "public_key": { "type": "string" },
-          "signature": { "type": "string" }
+          "signature": { "type": "string" },
+          "signer_id": { "type": "string" },
+          "signed_at": { "type": "string", "format": "date-time" }
         }
       }
     },
@@ -85,20 +92,28 @@
     },
     "shard_list": {
       "type": "array",
-      "description": "Canonical ordering and hashes of shards",
+      "description": "Canonical ordering and hashes of shards. Order defines shard processing sequence.",
+      "minItems": 1,
       "items": {
         "type": "object",
         "required": ["id", "entries_count", "entries_hash"],
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string",
+            "pattern": "^part-\\d{5}$",
+            "description": "Shard ID matching filename (e.g., part-00001)"
+          },
           "entries_count": { "type": "integer", "minimum": 0 },
-          "entries_hash": { "type": "string", "pattern": "^[a-z0-9]+:[a-f0-9]+$" }
+          "entries_hash": {
+            "type": "string",
+            "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+          }
         }
       }
     },
     "ids": {
       "type": "array",
-      "description": "Identifiers for the workspace/library in various namespaces",
+      "description": "Identifiers for the workspace/library in various namespaces. If workspace_id is set, an entry with ns='meshsync:workspace' MUST be present and match.",
       "items": {
         "type": "object",
         "required": ["ns", "id"],
@@ -112,29 +127,36 @@
       "type": "object",
       "description": "Provenance and configuration used to generate the pack",
       "properties": {
-        "generator": { "type": "string" },
+        "generator": {
+          "type": "string",
+          "description": "Tool name and version (e.g., 'plugin-storage-localfilesystem@1.4.0')"
+        },
         "config": { "type": "object", "additionalProperties": true },
         "resume_token": { "type": "string" },
-        "partial": { "type": "boolean" },
-        "base_pack_hash": { "type": "string", "pattern": "^[a-z0-9]+:[a-f0-9]+$" },
+        "partial": {
+          "type": "boolean",
+          "description": "If true, this is a delta pack referencing a base via base_pack_hash"
+        },
+        "base_pack_hash": {
+          "type": "string",
+          "description": "Hash of the base pack for delta operations. Required when partial=true.",
+          "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+        },
         "metamodel_filter": {
           "type": "object",
-          "description": "Filter applied during export for metamodel context. Models can belong to multiple metamodels; this specifies which context was used for export.",
+          "description": "Filter applied during export for metamodel context.",
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["all", "include", "exclude", "single"],
-              "description": "all: export all metamodel assignments; include: only specified IDs; exclude: all except specified; single: export in context of one metamodel"
+              "enum": ["all", "include", "exclude", "single"]
             },
             "metamodel_ids": {
               "type": "array",
-              "items": { "type": "string", "format": "uuid" },
-              "description": "Metamodel IDs for include/exclude/single mode"
+              "items": { "type": "string", "format": "uuid" }
             },
             "collapse_roles": {
               "type": "boolean",
-              "default": false,
-              "description": "If true and mode=single, use the role from the specified metamodel. If false, preserve all roles in metamodels[] array."
+              "default": false
             }
           }
         }
@@ -142,35 +164,29 @@
     },
     "import_policy": {
       "type": "object",
-      "description": "Guidance for conflict handling when importing into another backend",
+      "description": "Guidance for conflict handling when importing into another system",
       "properties": {
-        "id_conflict": { 
-          "type": "string", 
-          "enum": ["fail", "rename", "overwrite"],
-          "description": "fail: reject import if ID exists; rename: generate new ID; overwrite: replace existing"
+        "id_conflict": {
+          "type": "string",
+          "enum": ["fail", "skip", "overwrite"],
+          "description": "fail: reject import if ID exists; skip: keep existing, ignore incoming; overwrite: replace existing entry"
         },
-        "metamodel_merge": { 
-          "type": "string", 
-          "enum": ["strict", "append", "reconcile"],
-          "description": "strict: reject if metamodel structure differs; append: add files to existing metamodel; reconcile: merge with conflict resolution"
+        "metamodel_merge": {
+          "type": "string",
+          "enum": ["strict", "merge", "replace"],
+          "description": "strict: reject if metamodel structure differs; merge: add new files to existing metamodel; replace: replace entire metamodel"
         },
-        "strip_creator_info": { 
+        "strip_creator_info": {
           "type": "boolean",
           "description": "If true, importer should remove creator_info before storing"
         }
       }
     },
-    "encryption": {
-      "type": "object",
-      "properties": {
-        "alg": { "type": "string", "enum": ["age", "pgp"] },
-        "recipients": { "type": "array", "items": { "type": "string" } },
-        "encrypted": { "type": "boolean" }
-      }
-    },
     "extensions": {
       "type": "object",
+      "description": "Reserved for non-standard metadata. Keys MUST use namespace prefixes (e.g., 'mycompany_feature'). See EXTENSIONS.md.",
       "additionalProperties": true
     }
-  }
+  },
+  "additionalProperties": false
 }

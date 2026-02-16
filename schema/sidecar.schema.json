@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://meshsync.net/schemas/meshpack/sidecar.json",
-  "title": "MeshPack Sidecar Signature",
-  "description": "Detached integrity verification file for MeshPack archives. Required because pack_hash cannot be computed and stored inside the archive itself.",
+  "title": "MeshPack Integrity Sidecar",
+  "description": "Detached integrity verification file for MeshPack archives (*.meshpack.integrity). Required because pack_hash cannot be computed and stored inside the archive itself. This is the AUTHORITATIVE source for pack_hash and signatures.",
   "type": "object",
   "required": ["pack_name", "pack_size_bytes", "hash_algo", "pack_hash", "computed_at"],
   "properties": {
@@ -14,32 +14,32 @@
     "pack_size_bytes": {
       "type": "integer",
       "minimum": 0,
-      "description": "Size of the .meshpack file in bytes, for quick sanity check"
+      "description": "Size of the .meshpack file in bytes, for quick sanity check before hashing"
     },
     "hash_algo": {
       "type": "string",
       "enum": ["sha256", "sha512", "blake3"],
-      "description": "Algorithm used to compute pack_hash"
+      "description": "Algorithm used to compute pack_hash. MUST match manifest.hash_algo."
     },
     "pack_hash": {
       "type": "string",
-      "description": "The authoritative hash of the .meshpack archive bytes",
-      "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+      "description": "The AUTHORITATIVE hash of the .meshpack archive bytes (excluding items listed in 'exclusions'). Verifiers MUST use this value, not manifest.pack_hash.",
+      "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
     },
     "computed_at": {
       "type": "string",
       "format": "date-time",
-      "description": "When this sidecar was generated"
+      "description": "When this sidecar was generated (ISO 8601 UTC)"
     },
     "exclusions": {
       "type": "array",
-      "description": "List of ZIP entry paths excluded from hash computation (e.g., mapping.db)",
+      "description": "List of ZIP entry paths excluded from hash computation (e.g., mapping.db which is non-deterministic)",
       "items": { "type": "string" },
       "default": ["mapping.db"]
     },
     "signatures": {
       "type": "array",
-      "description": "Cryptographic signatures over pack_hash",
+      "description": "Cryptographic signatures over pack_hash for authenticity verification",
       "items": {
         "type": "object",
         "required": ["alg", "public_key", "signature"],
@@ -55,7 +55,7 @@
           },
           "signature": {
             "type": "string",
-            "description": "Base64-encoded signature over pack_hash string"
+            "description": "Base64-encoded signature over the pack_hash string bytes"
           },
           "signer_id": {
             "type": "string",
@@ -72,5 +72,6 @@
       "type": "object",
       "additionalProperties": true
     }
-  }
+  },
+  "additionalProperties": false
 }

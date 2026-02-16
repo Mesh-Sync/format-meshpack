@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meshsync.net/schemas/meshpack/common.json",
+  "title": "MeshPack Common Definitions",
+  "description": "Shared type definitions referenced by manifest, shard, and sidecar schemas. Canonical source of truth for shared enums and patterns.",
+  "definitions": {
+    "hashAlgorithm": {
+      "type": "string",
+      "enum": ["sha256", "sha512", "blake3"],
+      "description": "Supported hash algorithms. sha256 is RECOMMENDED for maximum compatibility."
+    },
+    "hashValue": {
+      "type": "string",
+      "description": "Prefixed hash value: {algorithm}:{lowercase_hex}",
+      "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+    },
+    "semver": {
+      "type": "string",
+      "description": "Semantic version string (MAJOR.MINOR.PATCH)",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "namespacedId": {
+      "type": "object",
+      "description": "Namespaced identifier for cross-system reconciliation",
+      "required": ["ns", "id"],
+      "properties": {
+        "ns": {
+          "type": "string",
+          "description": "Namespace prefix (e.g., meshsync:model, thingiverse:thing)"
+        },
+        "id": {
+          "type": "string",
+          "description": "Identifier value within the namespace"
+        }
+      },
+      "additionalProperties": false
+    },
+    "signatureEntry": {
+      "type": "object",
+      "description": "Cryptographic signature over pack_hash",
+      "required": ["alg", "public_key", "signature"],
+      "properties": {
+        "alg": {
+          "type": "string",
+          "enum": ["ed25519", "rsa-pss-sha256"],
+          "description": "Signature algorithm"
+        },
+        "public_key": {
+          "type": "string",
+          "description": "Base64-encoded public key"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Base64-encoded signature over pack_hash string"
+        },
+        "signer_id": {
+          "type": "string",
+          "description": "Optional identifier of the signer (email, key ID, etc.)"
+        },
+        "signed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the signature was created"
+        }
+      }
+    },
+    "importPolicy": {
+      "type": "object",
+      "description": "Guidance for conflict handling when importing into another system",
+      "properties": {
+        "id_conflict": {
+          "type": "string",
+          "enum": ["fail", "skip", "overwrite"],
+          "description": "fail: reject import if ID exists; skip: keep existing, ignore incoming; overwrite: replace existing entry"
+        },
+        "metamodel_merge": {
+          "type": "string",
+          "enum": ["strict", "merge", "replace"],
+          "description": "strict: reject if metamodel structure differs; merge: add new files to existing metamodel; replace: replace entire metamodel"
+        },
+        "strip_creator_info": {
+          "type": "boolean",
+          "description": "If true, importer should remove creator_info before storing"
+        }
+      }
+    },
+    "creatorInfo": {
+      "type": "object",
+      "description": "Entity that generated the pack. PII note: email field may contain personal data — redact or hash for public distribution.",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" }
+      }
+    },
+    "platformInfo": {
+      "type": "object",
+      "description": "Source platform metadata for cross-platform path handling",
+      "required": ["os", "path_separator", "is_case_sensitive"],
+      "properties": {
+        "os": {
+          "type": "string",
+          "enum": ["linux", "windows", "darwin", "unknown"]
+        },
+        "path_separator": { "type": "string" },
+        "is_case_sensitive": { "type": "boolean" }
+      }
+    },
+    "shardReference": {
+      "type": "object",
+      "description": "Reference to an index shard with integrity hash",
+      "required": ["id", "entries_count", "entries_hash"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^part-\\d{5}$",
+          "description": "Shard filename (e.g., part-00001)"
+        },
+        "entries_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entries_hash": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+        }
+      }
+    },
+    "metamodelRole": {
+      "type": "string",
+      "enum": ["canonical", "variant", "accessory", "doc"],
+      "description": "Role of a file within a metamodel grouping"
+    },
+    "assemblyRole": {
+      "type": "string",
+      "enum": ["body", "support", "accessory", "texture", "doc"],
+      "description": "Role of a component within an assembly hierarchy"
+    },
+    "units": {
+      "type": "string",
+      "enum": ["mm", "cm", "m", "in", "ft", "unitless"],
+      "description": "Measurement units for 3D geometry"
+    },
+    "upAxis": {
+      "type": "string",
+      "enum": ["+Z", "-Z", "+Y", "-Y"],
+      "description": "Up-axis orientation of the source model"
+    },
+    "deltaOperation": {
+      "type": "string",
+      "enum": ["add", "modify", "delete"],
+      "description": "Operation type for delta pack entries. Only present in packs where generation.partial=true."
+    },
+    "spdxLicense": {
+      "type": ["string", "null"],
+      "description": "License of the CONTENT (not the format). SHOULD use SPDX expression syntax (e.g., 'MIT', 'Apache-2.0', 'CC-BY-4.0'). Use 'Proprietary' for non-open-source content, 'LicenseRef-<id>' for custom licenses, or null if unknown."
+    }
+  }
+}

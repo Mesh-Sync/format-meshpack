@@ -275,14 +275,18 @@ Implementations MUST support generating delta packs:
 
 **Delta entry semantics**:
 
-| Scenario | Representation |
-|----------|----------------|
-| **New file** | Entry present, no matching `path` in base |
-| **Modified file** | Entry present with different `hash` |
-| **Deleted file** | Entry with `extensions._deleted: true` |
-| **Unchanged** | Entry NOT present (inherited from base) |
+Each `FileEntry` in a delta pack includes an `operation` field:
 
-**Deletion marker**:
+| Scenario | `operation` | Representation |
+|----------|-------------|----------------|
+| **New file** | `"add"` | Full entry with all fields |
+| **Modified file** | `"modify"` | Full entry with different `hash` |
+| **Deleted file** | `"delete"` | Entry with `size_bytes=0`, hash all zeros |
+| **Unchanged** | *(not present)* | Entry NOT present (inherited from base) |
+
+> **DEPRECATED**: The `extensions._deleted: true` marker is superseded by `operation: "delete"`. Implementations SHOULD accept both for backwards compatibility.
+
+**Deletion marker** (using `operation` field):
 ```json
 {
   "path": "old-file.stl",
@@ -290,9 +294,7 @@ Implementations MUST support generating delta packs:
   "size_bytes": 0,
   "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "modified_at": "2026-01-16T12:00:00Z",
-  "extensions": {
-    "_deleted": true
-  }
+  "operation": "delete"
 }
 ```
 
@@ -318,9 +320,11 @@ Implementations MUST merge delta packs:
 ```
 1. Load base pack entries into Map<path, FileEntry>
 2. For each entry in delta pack:
-   a. If extensions._deleted == true:
+   a. If entry.operation == "delete":
       - Remove from map
-   b. Else:
+   b. Else if entry.extensions._deleted == true (legacy):
+      - Remove from map
+   c. Else:
       - Upsert into map (add or replace)
 3. Result map = merged state
 ```
@@ -372,7 +376,7 @@ For delta packs:
 
 Implementations MUST support Ed25519 signatures in the sidecar file:
 
-**Sidecar with signature**:
+**Sidecar with signature** (`.meshpack.integrity`):
 ```json
 {
   "pack_name": "library.meshpack",
@@ -707,8 +711,8 @@ When importing, backend MUST handle conflicts based on `import_policy`:
 | Policy | Behavior |
 |--------|----------|
 | `fail` | Reject import if any ID exists |
-| `skip` | Skip entries with existing IDs |
-| `replace` | Overwrite existing entries |
+| `skip` | Skip entries with existing IDs, keep current |
+| `overwrite` | Overwrite existing entries with imported data |
 
 **`metamodel_merge`** handling:
 | Policy | Behavior |

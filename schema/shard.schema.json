@@ -2,29 +2,34 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://meshsync.net/schemas/meshpack/shard.json",
   "title": "MeshPack Index Shard",
-  "description": "Sharded file index containing a subset of file entries",
+  "description": "Sharded file index containing a subset of file entries. See common.schema.json for shared definitions.",
   "type": "object",
   "required": ["shard_id", "format_version", "entries", "entries_count", "entries_hash"],
   "properties": {
     "shard_id": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^part-\\d{5}$",
+      "description": "Shard identifier matching filename (e.g., part-00001). 1-based, 5-digit zero-padded."
     },
     "format_version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "MUST match the format_version in manifest.json"
     },
     "entries_hash": {
       "type": "string",
-      "description": "Hash of the sorted entries array for integrity",
-      "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+      "description": "Hash of the canonical JSON serialization of the sorted entries array. Computed per REQ-L2-010 using RFC 8785 (JCS) canonicalization.",
+      "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
     },
     "entries_count": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Number of entries in this shard. MUST match entries.length."
     },
     "creator_info": {
       "type": "object",
-      "description": "DEPRECATED: For backwards compatibility only. New implementations SHOULD omit this and rely on manifest.creator_info. Will be removed in format_version 2.0.0.",
+      "description": "DEPRECATED: For backwards compatibility only. New implementations MUST omit this and rely on manifest.creator_info. Will be removed in format_version 2.0.0.",
+      "deprecated": true,
       "properties": {
         "name": { "type": "string" },
         "email": { "type": "string" }
@@ -32,25 +37,28 @@
     },
     "entries": {
       "type": "array",
-      "description": "Array of file entries. L2 compliance requires max 10,000 entries OR 5MB uncompressed per shard (whichever triggers first). Validators SHOULD warn if limits exceeded.",
+      "description": "Array of file entries sorted by 'path' (UTF-8 byte order). MUST NOT exceed 10,000 entries per shard (REQ-L2-003).",
       "maxItems": 10000,
       "items": {
         "$ref": "#/definitions/fileEntry"
       }
     }
   },
+  "additionalProperties": false,
   "definitions": {
     "fileEntry": {
       "type": "object",
       "required": ["path", "original_name", "size_bytes", "hash", "modified_at"],
       "properties": {
-        "path": { 
+        "path": {
           "type": "string",
-          "description": "Relative path from root, POSIX separators"
+          "description": "Relative path from root, POSIX separators only (/). MUST NOT contain '..', absolute paths, or drive letters.",
+          "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]:)[^\\\\]+$",
+          "maxLength": 1024
         },
         "ids": {
           "type": "array",
-          "description": "Identifiers for this file in multiple namespaces (e.g., meshsync:model)",
+          "description": "Identifiers for this file in multiple namespaces (e.g., meshsync:model, thingiverse:thing)",
           "items": {
             "type": "object",
             "required": ["ns", "id"],
@@ -60,26 +68,35 @@
             }
           }
         },
-        "original_name": { "type": "string" },
-        "size_bytes": { "type": "integer", "minimum": 0 },
-        "hash": { 
+        "original_name": {
           "type": "string",
-          "pattern": "^[a-z0-9]+:[a-f0-9]+$" 
+          "description": "Original filename (preserving case, may differ from path basename)"
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "hash": {
+          "type": "string",
+          "description": "Content hash of the ORIGINAL file on the source filesystem",
+          "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
         },
         "modified_at": { "type": "string", "format": "date-time" },
         "created_at": { "type": "string", "format": "date-time" },
-        "mime_type": { "type": "string" },
+        "mime_type": {
+          "type": "string",
+          "description": "MIME type of the file (e.g., model/stl, model/gltf-binary)"
+        },
         "units": {
           "type": "string",
-          "enum": ["mm", "cm", "m", "in", "ft", "unitless"]
+          "enum": ["mm", "cm", "m", "in", "ft", "unitless"],
+          "description": "Measurement units for 3D geometry. 'unitless' if format does not specify."
         },
         "up_axis": {
           "type": "string",
-          "enum": ["+Z", "-Z", "+Y", "-Y"]
+          "enum": ["+Z", "-Z", "+Y", "-Y"],
+          "description": "Up-axis orientation of the SOURCE model file. Note: assembly transforms use the canonical +Y-up coordinate system regardless of this value."
         },
         "bounding_box": {
           "type": "object",
-          "description": "Axis-aligned bounding box in the SOURCE file's coordinate system. Use 'up_axis' to determine orientation. If 'up_axis' is +Z (common for STL), Z is vertical. If +Y (common for glTF), Y is vertical. Bounds are NOT transformed; consumers must apply up_axis conversion if needed. Units match the 'units' field.",
+          "description": "Axis-aligned bounding box in the SOURCE file's coordinate system. Units are inherited from the sibling 'units' field. Use 'up_axis' to interpret orientation.",
           "properties": {
             "min": {
               "type": "array",
@@ -95,20 +112,22 @@
               "minItems": 3,
               "maxItems": 3
             }
-          }
+          },
+          "required": ["min", "max"]
         },
-        "resource_ref": { 
-            "type": ["string", "null"],
-            "description": "If not null, corresponds to a file in resources/<hash>.<ext>"
+        "resource_ref": {
+          "type": ["string", "null"],
+          "description": "If not null, references a file in resources/ named as {hex_hash}.{ext} (no algo prefix — algo is implicit from manifest.hash_algo). Colons are avoided for Windows compatibility."
         },
         "resource_hash": {
           "type": "string",
-          "description": "Hash of the embedded resource file, if included",
-          "pattern": "^[a-z0-9]+:[a-f0-9]+$"
+          "description": "Hash of the embedded resource file in resources/. May differ from 'hash' if resource is a derivative (e.g., compressed thumbnail).",
+          "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
         },
         "resource_size_bytes": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Size of the embedded resource file in bytes"
         },
         "attributes": {
           "type": "object",
@@ -120,16 +139,18 @@
         "metamodel_id": {
           "type": "string",
           "format": "uuid",
-          "description": "DEPRECATED: Single metamodel ID. Use 'metamodels' array for 1:N support. Kept for backward compatibility; if both present, 'metamodels' takes precedence."
+          "description": "DEPRECATED: Single metamodel ID. Use 'metamodels' array for 1:N support. Kept for v1.0 backward compatibility; if both present, 'metamodels' takes precedence.",
+          "deprecated": true
         },
         "metamodel_role": {
           "type": "string",
           "enum": ["canonical", "variant", "accessory", "doc"],
-          "description": "DEPRECATED: Use 'metamodels' array with per-assignment roles. Applies to metamodel_id if metamodels[] is absent."
+          "description": "DEPRECATED: Use 'metamodels' array with per-assignment roles.",
+          "deprecated": true
         },
         "metamodels": {
           "type": "array",
-          "description": "Array of metamodel memberships. A file can belong to multiple metamodels (e.g., shared component in multiple kits). Each entry specifies the metamodel and the role within it. Supersedes metamodel_id/metamodel_role when present.",
+          "description": "Array of metamodel memberships. A file can belong to multiple metamodels. Supersedes metamodel_id/metamodel_role when present.",
           "items": {
             "type": "object",
             "required": ["id", "role"],
@@ -142,21 +163,25 @@
               "role": {
                 "type": "string",
                 "enum": ["canonical", "variant", "accessory", "doc"],
-                "description": "Role within this metamodel. A file CAN be 'canonical' in multiple metamodels."
+                "description": "Role within this metamodel"
               }
             }
           }
         },
         "assembly": {
           "type": "object",
-          "description": "Assembly graph info for placing this file. Transform is 4x4 column-major matrix, right-handed +Y up coordinate system.",
+          "description": "Assembly graph info. Transform is 4x4 column-major matrix in CANONICAL coordinate system (+Y up, right-handed, per glTF convention). Transforms are relative to parent assembly, not world space. If the source file uses a different up_axis, the transform MUST be pre-converted to canonical +Y up.",
           "properties": {
             "assembly_id": { "type": "string", "format": "uuid" },
             "parent_assembly_id": { "type": ["string", "null"], "format": "uuid" },
-            "role": { "type": "string", "enum": ["body", "support", "accessory", "texture", "doc"] },
+            "role": {
+              "type": "string",
+              "enum": ["body", "support", "accessory", "texture", "doc"]
+            },
             "transform": {
               "type": "object",
               "description": "4x4 homogeneous transform matrix in column-major order (OpenGL/glTF convention)",
+              "required": ["matrix"],
               "properties": {
                 "matrix": {
                   "type": "array",
@@ -171,16 +196,22 @@
         },
         "preview_ref": {
           "type": "string",
-          "description": "Reference to preview thumbnail in resources/"
+          "description": "Reference to preview thumbnail in resources/ (format: {hex_hash}.{ext})"
+        },
+        "operation": {
+          "type": "string",
+          "enum": ["add", "modify", "delete"],
+          "description": "Delta pack operation. Only present when manifest.generation.partial=true. 'delete' entries MUST have size_bytes=0 and hash set to all zeros."
         },
         "extensions": {
           "type": "object",
-          "description": "Extension data. Reserved keys starting with '_' are spec-defined.",
+          "description": "Extension data. Keys MUST use namespace prefixes. Reserved prefix '_' is for spec-defined control fields.",
           "properties": {
             "_deleted": {
               "type": "boolean",
               "const": true,
-              "description": "Delta pack marker: if true, this entry was DELETED from the base pack. When present, size_bytes MUST be 0 and hash MUST be all zeros."
+              "description": "DEPRECATED: Legacy delta pack deletion marker. Use 'operation: delete' instead. Kept for v1.0 backward compatibility.",
+              "deprecated": true
             }
           },
           "additionalProperties": true

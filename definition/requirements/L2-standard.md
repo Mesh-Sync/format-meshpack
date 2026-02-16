@@ -10,6 +10,22 @@
 
 ## 1. Pack Generation Requirements
 
+### REQ-L2-000: ZIP Entry Ordering
+
+**Category**: Archive
+**Type**: MUST
+**Testable**: Yes
+
+The `manifest.json` entry MUST be the **first** entry in the ZIP central directory. This enables streaming readers to parse the manifest without seeking through arbitrarily large archives.
+
+**Rationale**: Critical for streaming support and large archive performance.
+
+**Verification**:
+1. Generate pack, list ZIP entries
+2. Verify `manifest.json` is the first entry
+
+---
+
 ### REQ-L2-001: Valid Archive Creation
 
 **Category**: Archive
@@ -63,8 +79,8 @@ When generating a pack, implementations MUST:
 
 Implementations MUST shard entries deterministically:
 1. **Sort order**: Entries sorted by `path` field (UTF-8 byte order, ascending)
-2. **Shard naming**: `part-00001.json`, `part-00002.json`, etc. (1-based, 5-digit zero-padded)
-3. **Shard limits**: Maximum 10,000 entries OR 5 MB per shard (whichever triggers first)
+2. **Shard naming**: `part-00001.json`, `part-00002.json`, etc. (1-based, **5-digit** zero-padded)
+3. **Shard limits**: MUST NOT exceed **10,000 entries** per shard. SHOULD NOT exceed 5 MB per shard.
 4. **Distribution**: Last shard may have fewer entries
 
 **Rationale**: Deterministic output enables reproducible builds and caching.
@@ -119,11 +135,13 @@ entries_hash = hash(canonical_json(sorted(entries)))
 
 Where:
 1. `sorted(entries)` = entries sorted by `path` (UTF-8 byte order)
-2. `canonical_json()` = JSON with:
-   - Keys sorted alphabetically
+2. `canonical_json()` = JSON canonicalized per [RFC 8785 (JCS — JSON Canonicalization Scheme)](https://www.rfc-editor.org/rfc/rfc8785):
+   - Keys sorted alphabetically (recursive)
    - No whitespace between tokens
    - UTF-8 encoding
+   - Numbers serialized per RFC 8259 §6 (no NaN/Infinity, integers without decimal point)
    - No trailing newlines
+   - No BOM
 3. `hash()` = Algorithm from `manifest.hash_algo`
 4. Format: `{algorithm}:{lowercase_hex}` (e.g., `sha256:a1b2c3...`)
 
@@ -164,7 +182,9 @@ When reading a pack, implementations MUST:
 
 The authoritative `pack_hash` MUST be distributed via a detached sidecar file:
 
-**Sidecar filename**: `{packname}.meshpack.sig`
+**Sidecar filename**: `{packname}.meshpack.integrity`
+
+> **Note**: The `.integrity` extension is used instead of `.sig` to avoid confusion with PGP/GPG detached signature files.
 
 **Sidecar content** (JSON):
 ```json
@@ -174,6 +194,7 @@ The authoritative `pack_hash` MUST be distributed via a detached sidecar file:
   "hash_algo": "sha256",
   "pack_hash": "sha256:a1b2c3d4...",
   "computed_at": "2026-01-16T12:00:00Z",
+  "exclusions": ["mapping.db"],
   "signatures": []
 }
 ```
@@ -231,7 +252,7 @@ Implementations SHOULD default to `sha256` for maximum compatibility.
 When embedding resources, implementations MUST:
 1. Create `resources/` folder in archive root
 2. Name files as `{hash}.{extension}` where:
-   - `{hash}` = Content hash using manifest's `hash_algo`
+   - `{hash}` = Content hash **hex digits only** (no algorithm prefix) — algorithm is implicit from `manifest.hash_algo`. No colons in filenames for Windows compatibility.
    - `{extension}` = Original file extension (lowercase)
 3. Include `resources/_README.md` documenting:
    - Hash algorithm used
@@ -256,8 +277,8 @@ When a file is embedded in `resources/`, its `FileEntry` MUST include:
 
 | Field | Value |
 |-------|-------|
-| `resource_ref` | Filename in resources (e.g., `sha256:abc123...def.jpg`) |
-| `resource_hash` | Hash of embedded resource bytes |
+| `resource_ref` | Filename in resources (e.g., `e3b0c44298fc1c149...def.jpg`) — hex hash + extension, NO algo prefix |
+| `resource_hash` | Hash of embedded resource bytes (with algo prefix, e.g., `sha256:abc123...`) |
 | `resource_size_bytes` | Size of embedded resource |
 
 The `hash` field continues to reference the **original source file hash** (may differ if resource is transformed, e.g., compressed thumbnail).
