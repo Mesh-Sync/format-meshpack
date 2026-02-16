@@ -22,13 +22,21 @@ def load_schema(filename):
         return json.load(f)
 
 # Simple implementation to deduce type from schema property
+def snake_to_pascal(name: str) -> str:
+    """Convert snake_case or camelCase to PascalCase."""
+    # Handle snake_case
+    if "_" in name:
+        return "".join(word.capitalize() for word in name.split("_"))
+    # Handle camelCase — just capitalize first letter
+    return name[0].upper() + name[1:] if name else name
+
+
 def get_type_info(prop, prop_name, definitions=None):
     ref = prop.get("$ref")
     if ref:
         # e.g., "#/definitions/fileEntry" -> "FileEntry"
         def_name = ref.split("/")[-1]
-        # Capitalize for class names
-        return {"base": def_name[0].upper() + def_name[1:], "is_ref": True}
+        return {"base": snake_to_pascal(def_name), "is_ref": True}
     
     t = prop.get("type")
     
@@ -60,12 +68,11 @@ def get_type_info(prop, prop_name, definitions=None):
     if t == "object":
         # Check if it has specific properties (inline object) or is a Dict
         if "properties" in prop:
-            # Inline object -> assume it's mapped to a Class named after the property (PascalCase)
-            class_name = prop_name[0].upper() + prop_name[1:]
-            if prop_name == "platform_info": class_name = "PlatformInfo"
-            if prop_name == "creator_info": class_name = "CreatorInfo"
-            if prop_name == "index_summary": class_name = "IndexSummary"
-            if prop_name == "attributes": class_name = "FileAttributes"
+            # Inline object -> derive class name via snake_to_pascal
+            class_name = snake_to_pascal(prop_name)
+            # Special case: 'attributes' -> 'FileAttributes' for clarity
+            if prop_name == "attributes":
+                class_name = "FileAttributes"
             return {"base": class_name, "is_inline_class": True, "properties": prop["properties"]}
         
         # Generic object (Dict/Map)
@@ -80,7 +87,7 @@ def get_type_info(prop, prop_name, definitions=None):
         sub["is_optional"] = True
         return sub
         
-    return {"base": "any", "is_primitive": True}
+    return {"base": "unknown", "is_primitive": True}
 
 def extract_models(schema_data, root_name):
     """
@@ -336,8 +343,8 @@ typed-builder = "0.18"
             "jszip": "^3.10.1"
         },
         "devDependencies": {
-            "typescript": "^4.0.0",
-            "@types/node": "^18.0.0"
+            "typescript": "^5.0.0",
+            "@types/node": "^20.0.0"
         }
     }
     with open(os.path.join(OUTPUT_DIR, "typescript", "package.json"), "w") as f:

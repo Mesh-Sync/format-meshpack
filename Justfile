@@ -32,6 +32,8 @@ validate:
     # Ensure check-jsonschema is installed: pip install check-jsonschema
     check-jsonschema --check-metaschema schema/manifest.schema.json
     check-jsonschema --check-metaschema schema/shard.schema.json
+    check-jsonschema --check-metaschema schema/sidecar.schema.json
+    check-jsonschema --check-metaschema schema/common.schema.json
 
 compile:
     @echo "Compiling Python..."
@@ -64,8 +66,8 @@ lint:
     fi
 
 test:
-    @echo "Testing Python..."
-    # pytest # Enable when tests are added
+    @echo "Running conformance tests..."
+    pytest tests/conformance/ -v --tb=short
     @echo "Testing Rust..."
     if command -v cargo >/dev/null 2>&1; then \
         cd generated/sdks/rust/meshpack && cargo test; \

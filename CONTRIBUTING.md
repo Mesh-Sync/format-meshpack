@@ -84,6 +84,8 @@ Edit `definition/README.md` to update the human-readable specification.
 Edit JSON Schema files in `schema/`:
 - `manifest.schema.json` - Root manifest structure
 - `shard.schema.json` - Index shard and file entry definitions
+- `sidecar.schema.json` - Detached integrity sidecar
+- `common.schema.json` - Shared type definitions (canonical reference)
 
 After editing, validate:
 ```bash

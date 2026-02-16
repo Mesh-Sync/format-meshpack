@@ -48,7 +48,8 @@ If you are developing a widely used plugin or tool, please open a PR to add your
 | `meshsync_geometry` | MeshSync | 3D geometry metadata (vertex/face counts, manifold status) |
 | `meshsync_dependencies` | MeshSync | Material and texture file references |
 | `meshsync_printability` | MeshSync | 3D printing analysis results |
-| `_deleted` | MeshSync | Reserved for delta pack deletion markers |
+| `meshsync_content` | MeshSync | Rich content metadata (title, description, language, tags) |
+| `_deleted` | MeshSync | **Deprecated** — use `operation` field on FileEntry instead |
 
 ---
 
@@ -74,6 +75,11 @@ All official MeshSync extensions use **versioned data envelopes** to enable sche
 3. **Readers** MUST select the highest version they understand, ignore unknown versions
 4. **Breaking changes** require a new version number
 5. **Additive changes** (new optional fields) can stay in the same version
+
+> **SDK Complexity Note**: Extension versioning adds combinatorial complexity to
+> generated SDKs. Each extension with N versions produces N type variants. SDK
+> generators SHOULD provide a version-negotiation helper rather than exhaustive
+> per-version types. See `generators/generate_sdks.py` for the current approach.
 
 ### Migration Example
 
@@ -206,12 +212,47 @@ File dependencies for multi-file formats (OBJ+MTL, FBX with textures).
 | `can_nest` | SLS/MJF | Whether multiple copies can be packed |
 | `has_bridging` | FDM | Unsupported horizontal spans |
 
-### `_deleted` (Reserved)
+### `meshsync_content` (Planned)
 
-Used in delta packs to mark files for deletion. NOT a namespaced extension, NOT versioned.
+Rich content metadata for marketplace listings and display.
+
+```json
+"extensions": {
+  "meshsync_content": {
+    "v1": {
+      "title": "Stanford Bunny",
+      "description": "Classic 3D test model",
+      "language": "en",
+      "tags": ["test", "bunny", "classic"]
+    }
+  }
+}
+```
+
+> **Note**: The `language` field uses BCP 47 language tags (e.g., `"en"`, `"fr"`, `"de"`).
+
+---
+
+### `_deleted` (Deprecated)
+
+> **Deprecated in v1.0.0**: Use the `operation` field on `FileEntry` instead.
+> The `_deleted` extension marker is retained for backward compatibility with
+> pre-1.0 delta packs but MUST NOT be used in new packs.
+
+Legacy delta packs used this to mark files for deletion:
 
 ```json
 "extensions": {
   "_deleted": true
+}
+```
+
+New packs MUST use the first-class `operation` field:
+
+```json
+{
+  "path": "models/old_part.stl",
+  "operation": "delete",
+  "hash": "sha256:..."
 }
 ```

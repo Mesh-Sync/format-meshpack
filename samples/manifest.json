@@ -2,8 +2,14 @@
   "format_version": "1.0.0",
   "created_at": "2026-01-13T22:41:51.764620+00:00",
   "workspace_id": "test-workspace-001",
+  "hash_algo": "sha256",
+  "ids": [
+    "test-workspace-001"
+  ],
+  "license": "MIT",
   "creator_info": {
-    "name": "meshsync-local-agent"
+    "tool": "meshsync-local-agent",
+    "tool_version": "0.1.0"
   },
   "platform_info": {
     "os": "linux",
@@ -14,5 +20,17 @@
     "total_files": 17,
     "total_shards": 1,
     "total_size_bytes": 3179581
-  }
+  },
+  "shard_list": [
+    {
+      "id": "part-00001",
+      "entries_count": 17,
+      "entries_hash": "sha256:placeholder_compute_at_pack_time"
+    }
+  ],
+  "import_policy": {
+    "duplicate": "skip",
+    "conflict": "merge"
+  },
+  "extensions": {}
 }

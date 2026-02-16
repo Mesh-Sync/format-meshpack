@@ -9,7 +9,7 @@ The `.meshpack` format is a standardized container format used within the Mesh-S
 This format is designed to be:
 - **Portable**: Can be moved across systems (with platform metadata).
 - **Scalable**: Supports massive file counts via index sharding.
-- **Verifiable**: Includes hashing for integrity capability.
+- **Verifiable**: Includes hashing for integrity with detached `.meshpack.integrity` sidecar files.
 - **Extensible**: Designed with forward-compatibility for future versioning.
 
 MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fragmentation in 3D asset management. It bundles:
@@ -21,7 +21,7 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
 ## Repository Structure
 
 - **[`definition/`](definition/README.md)**: The human-readable specification (RFC-style). **Start here.**
-- **[`schema/`](schema/)**: Canonical JSON Schemas (`manifest.schema.json`, `shard.schema.json`, `sidecar.schema.json`) used for validation and code generation.
+- **[`schema/`](schema/)**: Canonical JSON Schemas (`manifest.schema.json`, `shard.schema.json`, `sidecar.schema.json`, `common.schema.json`) used for validation and code generation.
 - **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas.
 - **[`generated/`](generated/)**: (Gitignored) The output directory for generated SDKs.
 
@@ -40,7 +40,7 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 | Command | Description |
 |---------|-------------|
 | `just generate` | Generates SDK code for Python, Rust, and TypeScript into `generated/sdks/`. |
-| `just validate` | Validates the JSON schemas against the meta-schema. |
+| `just validate` | Validates all JSON schemas against the meta-schema. |
 | `just compile` | Builds the generated SDKs (Python Wheel, Rust Crate, NPM Package). |
 | `just all` | Runs generate, validate, and compile. |
 | `just clean` | Removes the `generated/` directory. |
