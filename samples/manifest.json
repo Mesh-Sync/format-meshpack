@@ -1,15 +1,17 @@
 {
   "format_version": "1.0.0",
   "created_at": "2026-01-13T22:41:51.764620+00:00",
-  "workspace_id": "test-workspace-001",
+  "workspace_id": null,
   "hash_algo": "sha256",
   "ids": [
-    "test-workspace-001"
+    {
+      "ns": "meshsync:workspace",
+      "id": "test-workspace-001"
+    }
   ],
   "license": "MIT",
   "creator_info": {
-    "tool": "meshsync-local-agent",
-    "tool_version": "0.1.0"
+    "name": "MeshSync Local Agent"
   },
   "platform_info": {
     "os": "linux",
@@ -25,12 +27,15 @@
     {
       "id": "part-00001",
       "entries_count": 17,
-      "entries_hash": "sha256:placeholder_compute_at_pack_time"
+      "entries_hash": "sha256:645378423681e8a1b4d5fc37067ea66f6ae81cf27f2ace629c036721c177cf40"
     }
   ],
+  "generation": {
+    "generator": "plugin-storage-localfilesystem@0.1.0"
+  },
   "import_policy": {
-    "duplicate": "skip",
-    "conflict": "merge"
+    "id_conflict": "skip",
+    "metamodel_merge": "merge"
   },
   "extensions": {}
 }

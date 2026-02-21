@@ -2,7 +2,7 @@
   "shard_id": "part-00001",
   "format_version": "1.0.0",
   "entries_count": 17,
-  "entries_hash": "sha256:placeholder_compute_at_pack_time",
+  "entries_hash": "sha256:645378423681e8a1b4d5fc37067ea66f6ae81cf27f2ace629c036721c177cf40",
   "entries": [
     {
       "path": "LICENSE.txt",
@@ -11,7 +11,6 @@
       "hash": "sha256:7bca0e956e2a1cb335f804d10879cbf6a279a671f87394a9a5fbb77579743e01",
       "modified_at": "2026-01-13T22:41:51.551610+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -24,7 +23,6 @@
       "hash": "sha256:94b4f532673503ee114341245910e6186f7c80fa0b60fdc4f13e4e31f37a347f",
       "modified_at": "2026-01-13T22:41:51.551610+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -37,7 +35,6 @@
       "hash": "sha256:19bfe416264d49a589ee03d57fd6646090d03a70a0492c25566af61f829a0bff",
       "modified_at": "2026-01-13T18:01:43.900093+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -50,7 +47,6 @@
       "hash": "sha256:fb15e3e01e369f610eec865796e40d92de5c52ef81db72544d1708878f89eb9f",
       "modified_at": "2026-01-13T18:01:33.858625+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -63,7 +59,6 @@
       "hash": "sha256:d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed",
       "modified_at": "2026-01-13T18:01:10.155246+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -76,7 +71,6 @@
       "hash": "sha256:03ab7fbb5e136c5601f313a72053cab112a06658d4c1e45701c87716393daabe",
       "modified_at": "2026-01-13T18:01:34.570724+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -89,7 +83,6 @@
       "hash": "sha256:d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed",
       "modified_at": "2026-01-13T18:01:10.447290+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -102,7 +95,6 @@
       "hash": "sha256:1eb35d1e21ce99e5ce911353b6be278990713448dd9e8f5c9387f9de39b32205",
       "modified_at": "2026-01-13T18:01:09.835198+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -115,7 +107,6 @@
       "hash": "sha256:d56c7c7c773a6f39215b9eb2123095b4e728794f50729cbf70ba92d7cb529294",
       "modified_at": "2026-01-13T18:02:30.247453+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -128,7 +119,6 @@
       "hash": "sha256:6e521dceb9cf5b0d9b375c607364f23c7a9db7d56a135f2a74c2da698b7671b3",
       "modified_at": "2026-01-13T18:00:31.974765+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -141,7 +131,6 @@
       "hash": "sha256:bb85e79657722363d4ab554926d08a322d867793fe8d50ee75e98c61e5329776",
       "modified_at": "2026-01-13T22:41:51.555610+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -154,7 +143,6 @@
       "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "modified_at": "2026-01-13T22:41:51.547609+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -167,7 +155,6 @@
       "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "modified_at": "2026-01-13T22:41:51.547609+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -180,7 +167,6 @@
       "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "modified_at": "2026-01-13T22:41:51.539608+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -193,7 +179,6 @@
       "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "modified_at": "2026-01-13T22:41:51.531608+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -206,7 +191,6 @@
       "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "modified_at": "2026-01-13T22:41:51.535608+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
@@ -219,7 +203,6 @@
       "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "modified_at": "2026-01-13T22:41:51.543609+00:00",
       "resource_ref": null,
-      "resource_hash": null,
       "attributes": {
         "is_symlink": false,
         "is_hidden": false
