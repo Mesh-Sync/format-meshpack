@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meshsync.net/schemas/meshpack/shard.json",
   "title": "MeshPack Index Shard",
   "description": "Sharded file index containing a subset of file entries. See common.schema.json for shared definitions.",
@@ -40,12 +40,12 @@
       "description": "Array of file entries sorted by 'path' (UTF-8 byte order). MUST NOT exceed 10,000 entries per shard (REQ-L2-003).",
       "maxItems": 10000,
       "items": {
-        "$ref": "#/definitions/fileEntry"
+        "$ref": "#/$defs/fileEntry"
       }
     }
   },
   "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "fileEntry": {
       "type": "object",
       "required": ["path", "original_name", "size_bytes", "hash", "modified_at"],

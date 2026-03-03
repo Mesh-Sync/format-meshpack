@@ -14,7 +14,9 @@ import zipfile
 
 import pytest
 
+# Add project root so we can import the validator, and conformance dir for conftest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from tools.meshpack_validate import validate, Severity  # noqa: E402
 from conftest import MeshPackBuilder  # noqa: E402

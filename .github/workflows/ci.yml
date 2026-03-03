@@ -2,10 +2,10 @@ name: Flash CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, develop ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, develop ]
 
 jobs:
   build-and-test:
@@ -25,10 +25,7 @@ jobs:
         node-version: '18'
 
     - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
+      uses: dtolnay/rust-toolchain@stable
 
     - name: Install Just
       uses: extractions/setup-just@v1
@@ -65,9 +62,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
+      - uses: dtolnay/rust-toolchain@stable
       - uses: extractions/setup-just@v1
 
       - name: Install Dependencies

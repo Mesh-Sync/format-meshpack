@@ -1,9 +1,9 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meshsync.net/schemas/meshpack/common.json",
   "title": "MeshPack Common Definitions",
   "description": "Shared type definitions referenced by manifest, shard, and sidecar schemas. Canonical source of truth for shared enums and patterns.",
-  "definitions": {
+  "$defs": {
     "hashAlgorithm": {
       "type": "string",
       "enum": ["sha256", "sha512", "blake3"],
