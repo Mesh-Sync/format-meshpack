@@ -21,6 +21,69 @@ def load_schema(filename):
     with open(os.path.join(SCHEMA_DIR, filename), "r") as f:
         return json.load(f)
 
+
+def load_common_definitions():
+    """Load shared definitions from common.schema.json for $ref resolution."""
+    common = load_schema("common.schema.json")
+    return common.get("definitions", {})
+
+
+def _try_resolve_common(ref_str, common_defs):
+    """Return a *copy* of the common definition if ref_str points to one, else None."""
+    prefix = "common.schema.json#/definitions/"
+    if ref_str.startswith(prefix):
+        def_name = ref_str[len(prefix):]
+        defn = common_defs.get(def_name)
+        if defn is not None:
+            return dict(defn)  # shallow copy
+    return None
+
+
+def resolve_common_refs(schema, common_defs):
+    """Recursively resolve $ref pointers to common.schema.json.
+
+    Handles two patterns used in the updated schemas:
+      1. Direct $ref:  {"$ref": "common.schema.json#/definitions/foo"}
+      2. allOf + $ref: {"allOf": [{"$ref": "common.schema.json#/..."}], "description": "..."}
+
+    Internal refs (e.g., "#/definitions/fileEntry") are left untouched so the
+    existing extract_models / get_type_info logic keeps working.
+    """
+    if isinstance(schema, list):
+        return [resolve_common_refs(item, common_defs) for item in schema]
+
+    if not isinstance(schema, dict):
+        return schema
+
+    # Pattern 2: allOf wrapping a single common $ref (used for $ref + description)
+    if "allOf" in schema:
+        all_of = schema["allOf"]
+        if (
+            len(all_of) == 1
+            and isinstance(all_of[0], dict)
+            and "$ref" in all_of[0]
+        ):
+            resolved = _try_resolve_common(all_of[0]["$ref"], common_defs)
+            if resolved is not None:
+                # Sibling keys (description, deprecated, …) override the resolved def
+                merged = dict(resolved)
+                for k, v in schema.items():
+                    if k != "allOf":
+                        merged[k] = v
+                return resolve_common_refs(merged, common_defs)
+
+    # Pattern 1: bare $ref to common
+    if "$ref" in schema:
+        resolved = _try_resolve_common(schema["$ref"], common_defs)
+        if resolved is not None:
+            return resolve_common_refs(resolved, common_defs)
+        # Internal ref — leave as-is
+        return schema
+
+    # Recurse into all values
+    return {k: resolve_common_refs(v, common_defs) for k, v in schema.items()}
+
+
 # Simple implementation to deduce type from schema property
 def snake_to_pascal(name: str) -> str:
     """Convert snake_case or camelCase to PascalCase."""
