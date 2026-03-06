@@ -27,11 +27,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
 import zipfile
-from typing import Iterable, List, Optional, Tuple
+from decimal import Decimal
+from typing import Any, Iterable, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -85,6 +87,141 @@ def file_chunks(path: str, chunk_size: int = 65_536) -> Iterable[bytes]:
             if not chunk:
                 break
             yield chunk
+
+
+# ---------------------------------------------------------------------------
+# RFC 8785 – JSON Canonicalization Scheme (JCS)
+# ---------------------------------------------------------------------------
+
+
+def _jcs_utf16_sort_key(s: str) -> List[int]:
+    """Return a sort key based on UTF-16 code unit values (RFC 8785 §3.2.3).
+
+    For characters in the Basic Multilingual Plane this is identical to
+    sorting by Unicode code point, but characters above U+FFFF are
+    represented as surrogate pairs and compared by code-unit order.
+    """
+    units: List[int] = []
+    for ch in s:
+        cp = ord(ch)
+        if cp >= 0x10000:
+            cp -= 0x10000
+            units.append(0xD800 + (cp >> 10))
+            units.append(0xDC00 + (cp & 0x3FF))
+        else:
+            units.append(cp)
+    return units
+
+
+def _jcs_serialize_string(s: str) -> str:
+    """Serialize a string per RFC 8785 §3.2.2.2.
+
+    Only the mandatory escape sequences are used; all other characters
+    (including non-ASCII) are passed through verbatim as required by JCS.
+    """
+    parts: List[str] = ['"']
+    for ch in s:
+        cp = ord(ch)
+        if ch == "\\":
+            parts.append("\\\\")
+        elif ch == '"':
+            parts.append('\\"')
+        elif ch == "\b":
+            parts.append("\\b")
+        elif ch == "\f":
+            parts.append("\\f")
+        elif ch == "\n":
+            parts.append("\\n")
+        elif ch == "\r":
+            parts.append("\\r")
+        elif ch == "\t":
+            parts.append("\\t")
+        elif cp < 0x20:
+            parts.append(f"\\u{cp:04x}")
+        else:
+            parts.append(ch)
+    parts.append('"')
+    return "".join(parts)
+
+
+def _jcs_serialize_number(value: Any) -> str:
+    """Serialize a number per RFC 8785 §3.2.2.3.
+
+    Follows the ECMAScript ``Number::toString`` algorithm (ECMA-262 §6.1.6.1.20):
+    integers are rendered without a decimal point; floats use the shortest
+    representation with ECMAScript-compatible exponential notation rules.
+    """
+    if isinstance(value, bool):
+        raise TypeError("bool is not a JSON number")
+    if isinstance(value, int):
+        return str(value)
+
+    # --- float handling ---
+    if math.isnan(value) or math.isinf(value):
+        raise ValueError("NaN and Infinity are not valid in JCS (RFC 8785)")
+    if value == 0.0:  # handles both +0.0 and -0.0
+        return "0"
+
+    sign = "-" if value < 0 else ""
+    abs_val = abs(value)
+
+    # Whole-number floats below 10^21 → render as integer
+    if abs_val.is_integer() and abs_val < 1e21:
+        return sign + str(int(abs_val))
+
+    # Decompose via Decimal for exact significant digits / exponent
+    _, d_digits, d_exp = Decimal(repr(abs_val)).as_tuple()
+    digits = "".join(str(d) for d in d_digits).rstrip("0") or "0"
+    zeros_stripped = len(d_digits) - len(digits)
+
+    k = len(digits)
+    n = d_exp + zeros_stripped + k  # ECMAScript "n" (decimal-point position)
+
+    # ECMAScript formatting rules (ECMA-262 §6.1.6.1.20, steps 5-9)
+    if k <= n <= 21:
+        result = digits + "0" * (n - k)
+    elif 0 < n <= 21:
+        result = digits[:n] + "." + digits[n:]
+    elif -6 < n <= 0:
+        result = "0." + "0" * (-n) + digits
+    elif k == 1:
+        e = n - 1
+        result = digits + "e" + ("+" if e >= 0 else "") + str(e)
+    else:
+        e = n - 1
+        result = (
+            digits[0] + "." + digits[1:] + "e" + ("+" if e >= 0 else "") + str(e)
+        )
+
+    return sign + result
+
+
+def jcs_canonicalize(value: Any) -> str:
+    """Serialize *value* to canonical JSON per RFC 8785 (JCS).
+
+    Recursively processes dicts, lists, strings, numbers, booleans, and None.
+    Object keys are sorted by UTF-16 code-unit order; numbers follow the
+    ECMAScript ``Number::toString`` algorithm; strings use JCS escape rules.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return _jcs_serialize_number(value)
+    if isinstance(value, str):
+        return _jcs_serialize_string(value)
+    if isinstance(value, (list, tuple)):
+        items = ",".join(jcs_canonicalize(item) for item in value)
+        return f"[{items}]"
+    if isinstance(value, dict):
+        sorted_keys = sorted(value.keys(), key=_jcs_utf16_sort_key)
+        pairs = ",".join(
+            f"{_jcs_serialize_string(k)}:{jcs_canonicalize(value[k])}"
+            for k in sorted_keys
+        )
+        return "{" + pairs + "}"
+    raise TypeError(f"Unsupported type for JCS serialization: {type(value)}")
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +408,14 @@ def check_hash_format(hash_value: str, shard_path: str, entry_path: str) -> List
 def verify_entries_hash(
     entries: List[dict], algo: str, expected_hash: str
 ) -> Tuple[bool, str]:
-    """Compute entries_hash using canonical JSON (sorted keys, no whitespace)."""
-    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """Compute entries_hash using RFC 8785 (JCS) canonical JSON.
+
+    Per REQ-L2-010 the hash is computed over the canonicalised,
+    path-sorted entries array:
+        entries_hash = hash(canonical_json(sorted(entries)))
+    """
+    sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
+    encoded = jcs_canonicalize(sorted_entries).encode("utf-8")
     digest = compute_digest([encoded], algo)
     actual = f"{algo}:{digest}"
     return actual == expected_hash, actual

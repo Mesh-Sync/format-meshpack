@@ -42,6 +42,93 @@ class TestArchiveFormat:
 
 
 # ---------------------------------------------------------------------------
+# REQ-L1-001 / Spec §2.1: Only DEFLATE (method 8) or STORE (method 0)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.REQ_L1_001
+class TestCompressionMethods:
+    def test_deflate_accepted(self, tmp_meshpack: str) -> None:
+        """DEFLATE compression (default) must not produce ZIP-002 errors."""
+        findings = validate(tmp_meshpack)
+        errors = [f for f in findings if f.code == "ZIP-002"]
+        assert len(errors) == 0
+
+    def test_store_accepted(
+        self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict
+    ) -> None:
+        """STORE compression (method 0) must not produce ZIP-002 errors."""
+        pack_builder.set_compression(zipfile.ZIP_STORED)
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.code == "ZIP-002"]
+            assert len(errors) == 0
+        finally:
+            os.unlink(path)
+
+    def test_bzip2_rejected(
+        self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict
+    ) -> None:
+        """BZip2 compression (method 12) must produce ZIP-002 errors."""
+        pack_builder.set_compression(zipfile.ZIP_BZIP2)
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "ZIP-002" for f in errors)
+            # Verify the error message mentions the offending method
+            zip002 = [f for f in errors if f.code == "ZIP-002"]
+            assert any("BZIP2" in f.message for f in zip002)
+        finally:
+            os.unlink(path)
+
+    def test_lzma_rejected(
+        self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict
+    ) -> None:
+        """LZMA compression (method 14) must produce ZIP-002 errors."""
+        pack_builder.set_compression(zipfile.ZIP_LZMA)
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "ZIP-002" for f in errors)
+            zip002 = [f for f in errors if f.code == "ZIP-002"]
+            assert any("LZMA" in f.message for f in zip002)
+        finally:
+            os.unlink(path)
+
+    def test_unsupported_compression_reports_all_entries(
+        self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict
+    ) -> None:
+        """Each entry using a prohibited method must generate its own ZIP-002 finding."""
+        second_entry = {
+            "path": "models/sphere.stl",
+            "size_bytes": 5678,
+            "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        pack_builder.set_compression(zipfile.ZIP_BZIP2)
+        path = pack_builder.add_shard(
+            "part-00001",
+            [minimal_valid_entry, second_entry],
+            entries_count=2,
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            zip002 = [f for f in findings if f.code == "ZIP-002"]
+            # Should flag every entry in the archive (manifest + shard)
+            assert len(zip002) >= 2
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
 # REQ-L1-002: manifest.json MUST exist at ZIP root
 # ---------------------------------------------------------------------------
 
