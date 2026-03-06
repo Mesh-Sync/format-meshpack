@@ -3,12 +3,7 @@
   "created_at": "2026-01-13T22:41:51.764620+00:00",
   "workspace_id": null,
   "hash_algo": "sha256",
-  "ids": [
-    {
-      "ns": "meshsync:workspace",
-      "id": "test-workspace-001"
-    }
-  ],
+  "ids": [],
   "license": "MIT",
   "creator_info": {
     "name": "MeshSync Local Agent"

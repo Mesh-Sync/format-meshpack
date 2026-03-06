@@ -152,6 +152,26 @@ def check_zip_ordering(zf: zipfile.ZipFile) -> List[Finding]:
     return findings
 
 
+def check_compression_methods(zf: zipfile.ZipFile) -> List[Finding]:
+    """Spec §2.1: All entries MUST use DEFLATE (method 8) or STORE (method 0)."""
+    findings: List[Finding] = []
+    for info in zf.infolist():
+        if info.compress_type not in ALLOWED_COMPRESS_TYPES:
+            method_name = COMPRESS_METHOD_NAMES.get(
+                info.compress_type, f"unknown({info.compress_type})"
+            )
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "ZIP-002",
+                    f"Entry '{info.filename}' uses unsupported compression method "
+                    f"{info.compress_type} ({method_name}). "
+                    "Only DEFLATE (8) or STORE (0) are allowed (Spec §2.1).",
+                )
+            )
+    return findings
+
+
 def check_manifest_fields(manifest: dict) -> List[Finding]:
     """Validate required manifest fields and value constraints."""
     findings: List[Finding] = []
