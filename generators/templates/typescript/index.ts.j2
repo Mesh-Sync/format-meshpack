@@ -238,25 +238,51 @@ export function setExtension(
 // ================== Typed Extension Interfaces ==================
 
 {% for ext in extensions %}
+{% for version_name, ext_models in ext.version_models.items() %}
+{% for model in ext_models %}
 /**
- * {{ ext.name }} v1 extension data
+ * {{ ext.name }} {{ version_name }}{% if not model.is_root %} ({{ model.name }}){% endif %} extension data
  */
-export interface {{ ext.name | replace('meshsync_', '') | title | replace('_', '') }}V1 {
-  [key: string]: any;  // Allow additional properties from schema
+export interface {{ model.name }} {
+{% for field in model.fields %}
+  {{ field.name }}?: {% if field.type.is_inline_class -%}
+  {{ field.type.base }}
+  {%- elif field.type.is_array -%}
+    {%- if field.type.item_type.base == "string" -%}
+    string[]
+    {%- elif field.type.item_type.base == "integer" or field.type.item_type.base == "number" -%}
+    number[]
+    {%- else -%}
+    any[]
+    {%- endif -%}
+  {%- elif field.type.base == "string" -%}
+  string
+  {%- elif field.type.base == "integer" or field.type.base == "number" -%}
+  number
+  {%- elif field.type.base == "boolean" -%}
+  boolean
+  {%- else -%}
+  any
+  {%- endif -%};
+{% endfor %}
 }
 
+{% endfor %}
+{% endfor %}
 {% endfor %}
 
 // ================== Convenience Accessors ==================
 
-export function getGeometry(extensions: Record<string, any> | undefined): GeometryV1 | undefined {
-  return getBestExtension<GeometryV1>(extensions, ExtensionNames.MESHSYNC_GEOMETRY, 'v1')?.data;
+{% for ext in extensions %}
+{% for version_name, ext_models in ext.version_models.items() %}
+{% for model in ext_models %}
+{% if model.is_root %}
+{% set func_name = ext.name | replace('meshsync_', '') | title | replace('_', '') %}
+export function get{{ func_name }}(extensions: Record<string, any> | undefined): {{ model.name }} | undefined {
+  return getBestExtension<{{ model.name }}>(extensions, ExtensionNames.{{ ext.name | upper }}, '{{ version_name }}')?.data;
 }
 
-export function getDependencies(extensions: Record<string, any> | undefined): DependenciesV1 | undefined {
-  return getBestExtension<DependenciesV1>(extensions, ExtensionNames.MESHSYNC_DEPENDENCIES, 'v1')?.data;
-}
-
-export function getPrintability(extensions: Record<string, any> | undefined): PrintabilityV1 | undefined {
-  return getBestExtension<PrintabilityV1>(extensions, ExtensionNames.MESHSYNC_PRINTABILITY, 'v1')?.data;
-}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endfor %}

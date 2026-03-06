@@ -1,5 +1,5 @@
 """
-L2 Conformance Tests — Standard Reader/Writer.
+L2 Conformance Tests -- Standard Reader/Writer.
 
 Tests in this module verify that a MeshPack archive meets the L2 (Standard
 Reader/Writer) requirements from definition/requirements/L2-standard.md.
@@ -7,6 +7,7 @@ Reader/Writer) requirements from definition/requirements/L2-standard.md.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -16,7 +17,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from tools.meshpack_validate import validate, Severity  # noqa: E402
+from tools.meshpack_validate import (  # noqa: E402
+    validate,
+    Severity,
+    jcs_canonicalize,
+    verify_entries_hash,
+    _jcs_serialize_number,
+    _jcs_serialize_string,
+)
 from conftest import MeshPackBuilder  # noqa: E402
 
 
@@ -144,6 +152,153 @@ class TestEntriesCount:
             findings = validate(path)
             errors = [f for f in findings if f.severity == Severity.ERROR]
             assert any("SHD-005" in f.code for f in errors)
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# REQ-L2-010: entries_hash MUST be verified using RFC 8785 (JCS)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.REQ_L2_010
+class TestEntriesHashRFC8785:
+    """Verify that entries_hash uses RFC 8785 (JCS) canonical JSON."""
+
+    def test_valid_hash_accepted(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """A pack with a correctly computed JCS entries_hash must pass validation."""
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            hash_errors = [f for f in errors if f.code == "SHD-007"]
+            assert not hash_errors, f"Unexpected hash mismatch: {hash_errors}"
+        finally:
+            os.unlink(path)
+
+    def test_wrong_hash_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """A pack with a bogus entries_hash must produce SHD-007."""
+        bogus_hash = "sha256:" + "0" * 64
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry],
+            entries_count=1, entries_hash=bogus_hash,
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any("SHD-007" in f.code for f in errors)
+        finally:
+            os.unlink(path)
+
+    def test_hash_uses_jcs_not_json_dumps(self) -> None:
+        """Ensure jcs_canonicalize differs from naive json.dumps for non-ASCII."""
+        # Non-ASCII characters must NOT be \\uXXXX-escaped in JCS
+        data = {"key": "caf\u00e9"}
+        jcs_out = jcs_canonicalize(data)
+        naive_out = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        # Python's json.dumps with ensure_ascii=True escapes the e-acute
+        assert "caf\u00e9" in jcs_out, "JCS must pass non-ASCII through verbatim"
+        assert "\\u00e9" in naive_out, "json.dumps should escape non-ASCII by default"
+
+    def test_jcs_recursive_key_sorting(self) -> None:
+        """Keys must be sorted recursively through nested objects."""
+        data = {"z": {"b": 2, "a": 1}, "a": 0}
+        result = jcs_canonicalize(data)
+        assert result == '{"a":0,"z":{"a":1,"b":2}}'
+
+    def test_jcs_number_integer(self) -> None:
+        """Integers must be rendered without decimal point."""
+        assert _jcs_serialize_number(42) == "42"
+        assert _jcs_serialize_number(0) == "0"
+        assert _jcs_serialize_number(-1) == "-1"
+
+    def test_jcs_number_float_whole(self) -> None:
+        """Whole-number floats below 10^21 render as integers per ECMAScript."""
+        assert _jcs_serialize_number(1.0) == "1"
+        assert _jcs_serialize_number(1e20) == "100000000000000000000"
+
+    def test_jcs_number_float_exponential(self) -> None:
+        """Large/small floats use ECMAScript exponential notation."""
+        assert _jcs_serialize_number(1e21) == "1e+21"
+        assert _jcs_serialize_number(1e-7) == "1e-7"
+
+    def test_jcs_number_float_small_decimal(self) -> None:
+        """Small decimals use 0.000... form when -6 < n <= 0."""
+        assert _jcs_serialize_number(1e-6) == "0.000001"
+        assert _jcs_serialize_number(0.1) == "0.1"
+
+    def test_jcs_number_negative_zero(self) -> None:
+        """Negative zero must render as '0' per RFC 8785."""
+        assert _jcs_serialize_number(-0.0) == "0"
+
+    def test_jcs_number_nan_infinity_rejected(self) -> None:
+        """NaN and Infinity must raise ValueError."""
+        import math
+        with pytest.raises(ValueError):
+            _jcs_serialize_number(float("nan"))
+        with pytest.raises(ValueError):
+            _jcs_serialize_number(float("inf"))
+
+    def test_jcs_string_control_chars(self) -> None:
+        """Control characters must use correct JCS escape sequences."""
+        assert _jcs_serialize_string("\t") == '"\\t"'
+        assert _jcs_serialize_string("\n") == '"\\n"'
+        assert _jcs_serialize_string("\x00") == '"\\u0000"'
+        assert _jcs_serialize_string("\x1f") == '"\\u001f"'
+
+    def test_jcs_string_non_ascii_verbatim(self) -> None:
+        """Non-ASCII characters must NOT be escaped in JCS."""
+        result = _jcs_serialize_string("\u00e9")  # e-acute
+        assert result == '"\u00e9"'
+
+    def test_entries_hash_sorts_before_hashing(self) -> None:
+        """verify_entries_hash must sort entries by path before hashing."""
+        entry_a = {
+            "path": "a.txt",
+            "size_bytes": 10,
+            "hash": "sha256:" + "aa" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        entry_z = {
+            "path": "z.txt",
+            "size_bytes": 20,
+            "hash": "sha256:" + "bb" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        # Compute the expected hash from sorted order
+        sorted_entries = [entry_a, entry_z]
+        canonical = jcs_canonicalize(sorted_entries).encode("utf-8")
+        expected = "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+        # Pass entries in reverse order -- hash should still match
+        ok, actual = verify_entries_hash([entry_z, entry_a], "sha256", expected)
+        assert ok, f"Hash mismatch: expected {expected}, got {actual}"
+
+    def test_entries_hash_with_multiple_entries(self, pack_builder: MeshPackBuilder) -> None:
+        """End-to-end: archive with multiple entries passes hash verification."""
+        entries = [
+            {
+                "path": "models/a.stl",
+                "size_bytes": 100,
+                "hash": "sha256:" + "aa" * 32,
+                "modified_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "path": "models/b.stl",
+                "size_bytes": 200,
+                "hash": "sha256:" + "bb" * 32,
+                "modified_at": "2026-01-01T00:00:00+00:00",
+            },
+        ]
+        path = pack_builder.add_shard(
+            "part-00001", entries, entries_count=2
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            hash_errors = [f for f in errors if f.code == "SHD-007"]
+            assert not hash_errors, f"Hash mismatch with multiple entries: {hash_errors}"
         finally:
             os.unlink(path)
 
