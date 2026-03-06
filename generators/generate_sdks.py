@@ -300,9 +300,10 @@ def load_extension_schemas():
     return extensions
 
 def main():
-    manifest_schema = load_schema("manifest.schema.json")
-    shard_schema = load_schema("shard.schema.json")
-    
+    common_defs = load_common_definitions()
+    manifest_schema = resolve_common_refs(load_schema("manifest.schema.json"), common_defs)
+    shard_schema = resolve_common_refs(load_schema("shard.schema.json"), common_defs)
+
     manifest_models = extract_models(manifest_schema, "Manifest")
     shard_models = extract_models(shard_schema, "Shard")
     
