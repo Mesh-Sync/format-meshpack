@@ -12,14 +12,12 @@
       "description": "Shard identifier matching filename (e.g., part-00001). 1-based, 5-digit zero-padded."
     },
     "format_version": {
-      "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "allOf": [{ "$ref": "common.schema.json#/definitions/semver" }],
       "description": "MUST match the format_version in manifest.json"
     },
     "entries_hash": {
-      "type": "string",
-      "description": "Hash of the canonical JSON serialization of the sorted entries array. Computed per REQ-L2-010 using RFC 8785 (JCS) canonicalization.",
-      "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+      "allOf": [{ "$ref": "common.schema.json#/definitions/hashValue" }],
+      "description": "Hash of the canonical JSON serialization of the sorted entries array. Computed per REQ-L2-010 using RFC 8785 (JCS) canonicalization."
     },
     "entries_count": {
       "type": "integer",
@@ -60,12 +58,7 @@
           "type": "array",
           "description": "Identifiers for this file in multiple namespaces (e.g., meshsync:model, thingiverse:thing)",
           "items": {
-            "type": "object",
-            "required": ["ns", "id"],
-            "properties": {
-              "ns": { "type": "string" },
-              "id": { "type": "string" }
-            }
+            "$ref": "common.schema.json#/definitions/namespacedId"
           }
         },
         "original_name": {
@@ -74,9 +67,8 @@
         },
         "size_bytes": { "type": "integer", "minimum": 0 },
         "hash": {
-          "type": "string",
-          "description": "Content hash of the ORIGINAL file on the source filesystem",
-          "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+          "allOf": [{ "$ref": "common.schema.json#/definitions/hashValue" }],
+          "description": "Content hash of the ORIGINAL file on the source filesystem"
         },
         "modified_at": { "type": "string", "format": "date-time" },
         "created_at": { "type": "string", "format": "date-time" },
@@ -85,13 +77,11 @@
           "description": "MIME type of the file (e.g., model/stl, model/gltf-binary)"
         },
         "units": {
-          "type": "string",
-          "enum": ["mm", "cm", "m", "in", "ft", "unitless"],
+          "allOf": [{ "$ref": "common.schema.json#/definitions/units" }],
           "description": "Measurement units for 3D geometry. 'unitless' if format does not specify."
         },
         "up_axis": {
-          "type": "string",
-          "enum": ["+Z", "-Z", "+Y", "-Y"],
+          "allOf": [{ "$ref": "common.schema.json#/definitions/upAxis" }],
           "description": "Up-axis orientation of the SOURCE model file. Note: assembly transforms use the canonical +Y-up coordinate system regardless of this value."
         },
         "bounding_box": {
@@ -120,9 +110,8 @@
           "description": "If not null, references a file in resources/ named as {hex_hash}.{ext} (no algo prefix — algo is implicit from manifest.hash_algo). Colons are avoided for Windows compatibility."
         },
         "resource_hash": {
-          "type": "string",
-          "description": "Hash of the embedded resource file in resources/. May differ from 'hash' if resource is a derivative (e.g., compressed thumbnail).",
-          "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+          "allOf": [{ "$ref": "common.schema.json#/definitions/hashValue" }],
+          "description": "Hash of the embedded resource file in resources/. May differ from 'hash' if resource is a derivative (e.g., compressed thumbnail)."
         },
         "resource_size_bytes": {
           "type": "integer",
@@ -143,8 +132,7 @@
           "deprecated": true
         },
         "metamodel_role": {
-          "type": "string",
-          "enum": ["canonical", "variant", "accessory", "doc"],
+          "allOf": [{ "$ref": "common.schema.json#/definitions/metamodelRole" }],
           "description": "DEPRECATED: Use 'metamodels' array with per-assignment roles.",
           "deprecated": true
         },
@@ -161,8 +149,7 @@
                 "description": "Metamodel identifier"
               },
               "role": {
-                "type": "string",
-                "enum": ["canonical", "variant", "accessory", "doc"],
+                "allOf": [{ "$ref": "common.schema.json#/definitions/metamodelRole" }],
                 "description": "Role within this metamodel"
               }
             }
@@ -175,8 +162,7 @@
             "assembly_id": { "type": "string", "format": "uuid" },
             "parent_assembly_id": { "type": ["string", "null"], "format": "uuid" },
             "role": {
-              "type": "string",
-              "enum": ["body", "support", "accessory", "texture", "doc"]
+              "$ref": "common.schema.json#/definitions/assemblyRole"
             },
             "transform": {
               "type": "object",
@@ -199,8 +185,7 @@
           "description": "Reference to preview thumbnail in resources/ (format: {hex_hash}.{ext})"
         },
         "operation": {
-          "type": "string",
-          "enum": ["add", "modify", "delete"],
+          "allOf": [{ "$ref": "common.schema.json#/definitions/deltaOperation" }],
           "description": "Delta pack operation. Only present when manifest.generation.partial=true. 'delete' entries MUST have size_bytes=0 and hash set to all zeros."
         },
         "extensions": {
