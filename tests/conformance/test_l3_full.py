@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from tools.meshpack_validate import validate, Severity  # noqa: E402
 from conftest import MeshPackBuilder  # noqa: E402
+
+SCHEMA_DIR = Path(__file__).parent.parent.parent / "schema"
+EXTENSIONS_SCHEMA_DIR = SCHEMA_DIR / "extensions"
 
 
 # ---------------------------------------------------------------------------

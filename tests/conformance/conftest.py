@@ -55,6 +55,7 @@ class MeshPackBuilder:
         self._resources: Dict[str, bytes] = {}
         self._extra_files: Dict[str, bytes] = {}
         self._manifest_first: bool = True
+        self._compression: int = zipfile.ZIP_DEFLATED
 
     def set_manifest_field(self, key: str, value: Any) -> "MeshPackBuilder":
         self._manifest[key] = value
@@ -107,10 +108,15 @@ class MeshPackBuilder:
         self._manifest_first = False
         return self
 
+    def set_compression(self, method: int) -> "MeshPackBuilder":
+        """Override ZIP compression method for all entries (for negative tests)."""
+        self._compression = method
+        return self
+
     def build(self) -> bytes:
         """Build the .meshpack ZIP archive as bytes."""
         buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(buf, "w", self._compression) as zf:
             manifest_bytes = json.dumps(self._manifest, indent=2).encode("utf-8")
 
             if self._manifest_first:

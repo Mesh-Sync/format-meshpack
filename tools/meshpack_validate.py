@@ -40,6 +40,7 @@ from typing import Iterable, List, Optional, Tuple
 SHARD_ID_PATTERN = re.compile(r"^part-\d{5}$")
 PATH_MAX_LENGTH = 1024
 PATH_TRAVERSAL_PATTERN = re.compile(r"(^|/)\.\.(/|$)")
+DRIVE_LETTER_PATTERN = re.compile(r"^[A-Za-z]:")
 HASH_PATTERN = re.compile(
     r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
 )
@@ -265,9 +266,18 @@ def check_entry_path(entry: dict, shard_path: str) -> List[Finding]:
     if path.startswith("/"):
         findings.append(
             Finding(
-                Severity.WARNING,
+                Severity.ERROR,
                 "ENT-003",
                 f"Absolute path in {shard_path}: {path}",
+            )
+        )
+
+    if DRIVE_LETTER_PATTERN.match(path):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ENT-004",
+                f"Drive letter path in {shard_path}: {path}",
             )
         )
 
