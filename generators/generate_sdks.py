@@ -119,7 +119,10 @@ def get_type_info(prop, prop_name, definitions=None):
     
     if t == "integer":
         return {"base": "integer", "is_primitive": True}
-    
+
+    if t == "number":
+        return {"base": "number", "is_primitive": True}
+
     if t == "boolean":
         return {"base": "boolean", "is_primitive": True}
     
@@ -269,6 +272,64 @@ def extract_models(schema_data, root_name):
 
     return models
 
+
+def extract_extension_models(version_schema, ext_name, version_name):
+    """Extract typed models from an extension version schema.
+
+    Returns a list of model dicts: sub-models (for nested objects) first,
+    followed by the root model for the version.
+    """
+    models = []
+
+    # Build class name: meshsync_geometry + v1 -> GeometryV1
+    base_name = ext_name.replace('meshsync_', '')
+    pascal_name = snake_to_pascal(base_name)
+    model_name = f"{pascal_name}{version_name.upper()}"
+
+    props = version_schema.get('properties', {})
+    required_list = version_schema.get('required', [])
+    fields = []
+
+    for pname, pdef in props.items():
+        type_info = get_type_info(pdef, pname)
+
+        # Handle inline classes — nested objects become sub-models
+        if type_info.get('is_inline_class'):
+            sub_model_name = f"{model_name}{snake_to_pascal(pname)}"
+            type_info['base'] = sub_model_name
+
+            inline_required = pdef.get('required', [])
+            inline_fields = []
+            for ipname, ipdef in type_info['properties'].items():
+                itype_info = get_type_info(ipdef, ipname)
+                inline_fields.append({
+                    'name': ipname,
+                    'type': itype_info,
+                    'required': ipname in inline_required
+                })
+
+            models.append({
+                'name': sub_model_name,
+                'fields': inline_fields,
+                'is_root': False
+            })
+
+        fields.append({
+            'name': pname,
+            'type': type_info,
+            'required': pname in required_list
+        })
+
+    # Main model last so sub-models are defined first in output
+    models.append({
+        'name': model_name,
+        'fields': fields,
+        'is_root': True
+    })
+
+    return models
+
+
 # Helper to render templates
 def render_template(template_path, context, output_path):
     env = Environment(loader=FileSystemLoader(TEMPLATES_DIR))
@@ -280,22 +341,33 @@ def render_template(template_path, context, output_path):
     print(f"Generated: {output_path}")
 
 def load_extension_schemas():
-    """Load all extension schemas from the extensions/ directory."""
+    """Load all extension schemas and extract typed models for each version."""
     extensions = []
     if not os.path.exists(EXTENSIONS_DIR):
         return extensions
-    
-    for filename in os.listdir(EXTENSIONS_DIR):
+
+    for filename in sorted(os.listdir(EXTENSIONS_DIR)):
         if filename.endswith('.schema.json'):
             filepath = os.path.join(EXTENSIONS_DIR, filename)
             with open(filepath, 'r') as f:
                 schema = json.load(f)
                 # Extract extension name from filename: meshsync_geometry.schema.json -> meshsync_geometry
                 ext_name = filename.replace('.schema.json', '')
+                versions = list(schema.get('properties', {}).keys())
+
+                # Extract typed models for each version
+                version_models = {}
+                for version_name in versions:
+                    version_schema = schema['properties'][version_name]
+                    version_models[version_name] = extract_extension_models(
+                        version_schema, ext_name, version_name
+                    )
+
                 extensions.append({
                     'name': ext_name,
                     'schema': schema,
-                    'versions': list(schema.get('properties', {}).keys())  # e.g., ['v1', 'v2']
+                    'versions': versions,
+                    'version_models': version_models
                 })
     return extensions
 

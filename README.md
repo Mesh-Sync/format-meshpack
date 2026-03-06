@@ -21,7 +21,11 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
 ## Repository Structure
 
 - **[`definition/`](definition/README.md)**: The human-readable specification (RFC-style). **Start here.**
-- **[`schema/`](schema/)**: Canonical JSON Schemas (`manifest.schema.json`, `shard.schema.json`, `sidecar.schema.json`, `common.schema.json`) used for validation and code generation.
+- **[`schema/`](schema/)**: Canonical JSON Schemas used for validation and code generation.
+  - [`manifest.schema.json`](schema/manifest.schema.json): Package-level metadata (identity, versioning, licensing, assets).
+  - [`shard.schema.json`](schema/shard.schema.json): Sharded search-index entries for fast local lookup.
+  - [`sidecar.schema.json`](schema/sidecar.schema.json): Detached integrity sidecar (`.meshpack.integrity`) format.
+  - [`common.schema.json`](schema/common.schema.json): Shared definitions (`$defs`) referenced by other schemas.
 - **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas.
 - **[`generated/`](generated/)**: (Gitignored) The output directory for generated SDKs.
 
