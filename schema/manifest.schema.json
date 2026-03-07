@@ -83,7 +83,7 @@
     },
     "index_summary": {
       "type": "object",
-      "required": ["total_files", "total_shards"],
+      "required": ["total_files", "total_shards", "total_size_bytes"],
       "properties": {
         "total_files": { "type": "integer", "minimum": 0 },
         "total_shards": { "type": "integer", "minimum": 1 },

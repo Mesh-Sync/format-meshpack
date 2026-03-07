@@ -162,6 +162,7 @@ def minimal_valid_entry() -> Dict[str, Any]:
     """A minimal valid FileEntry."""
     return {
         "path": "models/cube.stl",
+        "original_name": "cube.stl",
         "size_bytes": 1234,
         "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "modified_at": "2026-01-01T00:00:00+00:00",
