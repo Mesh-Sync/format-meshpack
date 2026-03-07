@@ -29,6 +29,8 @@ class {{ model.name }}(BaseModel):
     {{ field.name }}: {{ "int" if field.required else "Optional[int]" }} {{ "= None" if not field.required else "" }}
         {% elif field.type.base == "boolean" %}
     {{ field.name }}: {{ "bool" if field.required else "Optional[bool]" }} {{ "= False" if not field.required else "" }}
+        {% elif field.type.base == "number" %}
+    {{ field.name }}: {{ "float" if field.required else "Optional[float]" }} {{ "= None" if not field.required else "" }}
         {% elif field.type.base == "datetime" %}
     {{ field.name }}: {{ "datetime" if field.required else "Optional[datetime]" }} {{ "= None" if not field.required else "" }}
         {% elif field.type.base == "email" %}
