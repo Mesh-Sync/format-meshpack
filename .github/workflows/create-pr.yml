@@ -1,0 +1,46 @@
+name: Create PR
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create or update pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+
+          # Determine target base: parent agent branch or master
+          # Agent branches follow the pattern agent/<agent-name>/<issue-number>-<slug>
+          PR_TARGET_BASE="master"
+
+          # Check if a PR already exists for this branch targeting the correct base
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --base "$PR_TARGET_BASE" --json number,url --jq '.[0].url // empty')
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR already exists: $EXISTING_PR"
+            exit 0
+          fi
+
+          # Close any PRs targeting the wrong base
+          gh pr list --head "$BRANCH" --json number,baseRefName --jq ".[] | select(.baseRefName != \"$PR_TARGET_BASE\") | .number" | while read -r pr_number; do
+            echo "Closing PR #$pr_number (targets wrong base)"
+            gh pr close "$pr_number" --comment "Closing: PR target base should be \`$PR_TARGET_BASE\`, not the current base. A new PR will be created."
+          done
+
+          echo "PR_TARGET_BASE: $PR_TARGET_BASE"
+          gh pr create \
+            --base "$PR_TARGET_BASE" \
+            --title "[agent] ${BRANCH}" \
+            --body "Automated PR for branch \`${BRANCH}\`."
