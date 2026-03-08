@@ -34,6 +34,10 @@ validate:
     check-jsonschema --check-metaschema schema/shard.schema.json
     check-jsonschema --check-metaschema schema/sidecar.schema.json
     check-jsonschema --check-metaschema schema/common.schema.json
+    @echo "Validating extension schemas..."
+    check-jsonschema --check-metaschema schema/extensions/meshsync_geometry.schema.json
+    check-jsonschema --check-metaschema schema/extensions/meshsync_printability.schema.json
+    check-jsonschema --check-metaschema schema/extensions/meshsync_dependencies.schema.json
 
 compile:
     @echo "Compiling Python..."
