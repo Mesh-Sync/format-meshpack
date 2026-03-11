@@ -50,6 +50,17 @@ SUPPORTED_ALGOS = {"sha256", "sha512"}  # blake3 requires optional dep
 # ---------------------------------------------------------------------------
 
 
+def jcs_canonicalize(obj: object) -> bytes:
+    """Serialize *obj* to canonical JSON bytes (RFC 8785 — JCS).
+
+    Current implementation uses ``json.dumps(sort_keys=True)`` which is a
+    reasonable approximation for the common case.  A future revision
+    (see issue #3) will switch to a dedicated RFC 8785 library to handle
+    edge-cases such as number formatting and recursive key sorting.
+    """
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
 def _get_hasher(algo: str) -> "hashlib._Hash":
     """Return a hashlib instance for the given algorithm name."""
     algo = algo.lower()
@@ -271,8 +282,8 @@ def check_hash_format(hash_value: str, shard_path: str, entry_path: str) -> List
 def verify_entries_hash(
     entries: List[dict], algo: str, expected_hash: str
 ) -> Tuple[bool, str]:
-    """Compute entries_hash using canonical JSON (sorted keys, no whitespace)."""
-    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """Compute entries_hash using canonical JSON (RFC 8785 JCS)."""
+    encoded = jcs_canonicalize(entries)
     digest = compute_digest([encoded], algo)
     actual = f"{algo}:{digest}"
     return actual == expected_hash, actual

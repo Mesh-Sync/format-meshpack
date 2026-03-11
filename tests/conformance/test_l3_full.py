@@ -57,27 +57,26 @@ class TestDeltaOperations:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L3-010: import_policy.duplicate enum values
+# REQ-L3-010: import_policy field validation (schema-authoritative names)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.REQ_L3_010
 class TestImportPolicy:
-    @pytest.mark.parametrize("duplicate", ["fail", "skip", "overwrite"])
-    def test_valid_duplicate_values(self, duplicate: str) -> None:
-        """Valid duplicate policy values: fail, skip, overwrite."""
+    @pytest.mark.parametrize("id_conflict", ["fail", "skip", "overwrite"])
+    def test_valid_id_conflict_values(self, id_conflict: str) -> None:
+        """Valid id_conflict policy values: fail, skip, overwrite."""
         manifest = {
-            "import_policy": {"duplicate": duplicate, "conflict": "merge"}
+            "import_policy": {"id_conflict": id_conflict, "metamodel_merge": "merge"}
         }
-        # Just validate the enum values are accepted by the schema
-        assert manifest["import_policy"]["duplicate"] in ("fail", "skip", "overwrite")
+        assert manifest["import_policy"]["id_conflict"] in ("fail", "skip", "overwrite")
 
-    @pytest.mark.parametrize("conflict", ["strict", "merge", "replace"])
-    def test_valid_conflict_values(self, conflict: str) -> None:
-        """Valid conflict policy values: strict, merge, replace."""
+    @pytest.mark.parametrize("metamodel_merge", ["strict", "merge", "replace"])
+    def test_valid_metamodel_merge_values(self, metamodel_merge: str) -> None:
+        """Valid metamodel_merge policy values: strict, merge, replace."""
         manifest = {
-            "import_policy": {"duplicate": "skip", "conflict": conflict}
+            "import_policy": {"id_conflict": "skip", "metamodel_merge": metamodel_merge}
         }
-        assert manifest["import_policy"]["conflict"] in ("strict", "merge", "replace")
+        assert manifest["import_policy"]["metamodel_merge"] in ("strict", "merge", "replace")
 
 
 # ---------------------------------------------------------------------------
