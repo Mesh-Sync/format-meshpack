@@ -22,6 +22,10 @@ generate:
     @echo "Generating SDKs..."
     python3 generators/generate_sdks.py
 
+generate-fixtures:
+    @echo "Generating static test fixtures..."
+    python3 tests/conformance/generate_fixtures.py
+
 doc:
     @echo "Generating PDF documentation..."
     pandoc definition/README.md -o definition/meshpack-spec.pdf --toc -V geometry:margin=1in
