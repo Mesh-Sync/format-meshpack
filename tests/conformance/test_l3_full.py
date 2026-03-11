@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from tools.meshpack_validate import validate, Severity  # noqa: E402
+from tools.meshpack_validate import validate, Severity, verify_signature_entries  # noqa: E402
 from conftest import MeshPackBuilder  # noqa: E402
 
 
@@ -136,3 +136,78 @@ class TestSidecarVerification:
         finally:
             os.unlink(path)
             os.unlink(sidecar_path)
+
+
+# ---------------------------------------------------------------------------
+# REQ-L3-030: Signature verification
+# ---------------------------------------------------------------------------
+
+cryptography = pytest.importorskip("cryptography", reason="cryptography package not installed")
+
+
+class TestSignatureVerificationCrypto:
+    """Verify that Ed25519 and RSA-PSS-SHA256 signatures are checked."""
+
+    def test_ed25519_valid_signature(self) -> None:
+        """A valid Ed25519 signature over pack_hash should produce SIG-010."""
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        pub_bytes = public_key.public_bytes_raw()
+
+        pack_hash = "sha256:" + "ab" * 32
+        sig_bytes = private_key.sign(pack_hash.encode("utf-8"))
+
+        signatures = [{
+            "alg": "ed25519",
+            "public_key": base64.b64encode(pub_bytes).decode(),
+            "signature": base64.b64encode(sig_bytes).decode(),
+            "signer_id": "test-signer",
+        }]
+
+        findings = verify_signature_entries(signatures, pack_hash)
+        infos = [f for f in findings if f.code == "SIG-010"]
+        assert infos, f"Expected SIG-010 success, got: {findings}"
+
+    def test_ed25519_invalid_signature(self) -> None:
+        """A forged Ed25519 signature should produce SIG-004 error."""
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        pub_bytes = public_key.public_bytes_raw()
+
+        pack_hash = "sha256:" + "ab" * 32
+        sig_bytes = private_key.sign(b"wrong-data")
+
+        signatures = [{
+            "alg": "ed25519",
+            "public_key": base64.b64encode(pub_bytes).decode(),
+            "signature": base64.b64encode(sig_bytes).decode(),
+        }]
+
+        findings = verify_signature_entries(signatures, pack_hash)
+        errors = [f for f in findings if f.code == "SIG-004"]
+        assert errors, f"Expected SIG-004 error, got: {findings}"
+
+    def test_missing_fields_sig002(self) -> None:
+        """Signature entries with missing fields should produce SIG-002."""
+        signatures = [{"alg": "ed25519"}]
+        findings = verify_signature_entries(signatures, "sha256:" + "00" * 32)
+        errors = [f for f in findings if f.code == "SIG-002"]
+        assert errors
+
+    def test_unsupported_algorithm_sig005(self) -> None:
+        """Unsupported algorithm should produce SIG-005 info."""
+        import base64
+        signatures = [{
+            "alg": "unknown-algo",
+            "public_key": base64.b64encode(b"key").decode(),
+            "signature": base64.b64encode(b"sig").decode(),
+        }]
+        findings = verify_signature_entries(signatures, "sha256:" + "00" * 32)
+        infos = [f for f in findings if f.code == "SIG-005"]
+        assert infos

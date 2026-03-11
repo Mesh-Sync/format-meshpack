@@ -653,9 +653,93 @@ def verify_sidecar(
                 Severity.INFO,
                 "SDC-011",
                 f"Sidecar contains {len(signatures)} signature(s). "
-                "Signature verification requires external key material (not checked here).",
+                "Use --verify-signatures to check them.",
             )
         )
+
+    return findings
+
+
+def verify_signature_entries(
+    signatures: List[dict], pack_hash: str
+) -> List[Finding]:
+    """Verify cryptographic signatures over pack_hash (REQ-L3-030)."""
+    findings: List[Finding] = []
+
+    try:
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+        from cryptography.hazmat.primitives.hashes import SHA256
+        from cryptography.hazmat.primitives.serialization import load_der_public_key
+    except ImportError:
+        findings.append(
+            Finding(
+                Severity.WARNING,
+                "SIG-001",
+                "Signature verification requires the 'cryptography' package: "
+                "pip install cryptography",
+            )
+        )
+        return findings
+
+    # The signed data is the pack_hash string encoded as UTF-8
+    signed_data = pack_hash.encode("utf-8")
+
+    for i, sig_entry in enumerate(signatures):
+        alg = sig_entry.get("alg", "")
+        pub_key_b64 = sig_entry.get("public_key", "")
+        sig_b64 = sig_entry.get("signature", "")
+        signer = sig_entry.get("signer_id", f"signature[{i}]")
+
+        if not alg or not pub_key_b64 or not sig_b64:
+            findings.append(
+                Finding(Severity.ERROR, "SIG-002",
+                        f"{signer}: missing required field (alg/public_key/signature)")
+            )
+            continue
+
+        try:
+            pub_key_bytes = base64.b64decode(pub_key_b64)
+            sig_bytes = base64.b64decode(sig_b64)
+        except Exception as exc:
+            findings.append(
+                Finding(Severity.ERROR, "SIG-003",
+                        f"{signer}: invalid base64 encoding — {exc}")
+            )
+            continue
+
+        if alg == "ed25519":
+            try:
+                key = Ed25519PublicKey.from_public_bytes(pub_key_bytes)
+                key.verify(sig_bytes, signed_data)
+                findings.append(
+                    Finding(Severity.INFO, "SIG-010",
+                            f"{signer}: Ed25519 signature verified successfully")
+                )
+            except Exception as exc:
+                findings.append(
+                    Finding(Severity.ERROR, "SIG-004",
+                            f"{signer}: Ed25519 signature verification failed — {exc}")
+                )
+        elif alg == "rsa-pss-sha256":
+            try:
+                key = load_der_public_key(pub_key_bytes)
+                key.verify(sig_bytes, signed_data, PSS(mgf=MGF1(SHA256()), salt_length=PSS.MAX_LENGTH), SHA256())
+                findings.append(
+                    Finding(Severity.INFO, "SIG-010",
+                            f"{signer}: RSA-PSS-SHA256 signature verified successfully")
+                )
+            except Exception as exc:
+                findings.append(
+                    Finding(Severity.ERROR, "SIG-004",
+                            f"{signer}: RSA-PSS-SHA256 signature verification failed — {exc}")
+                )
+        else:
+            findings.append(
+                Finding(Severity.INFO, "SIG-005",
+                        f"{signer}: unsupported algorithm '{alg}' — skipped")
+            )
 
     return findings
 
@@ -670,6 +754,7 @@ def validate(
     sidecar_path: Optional[str] = None,
     max_size: int = MAX_DECOMPRESSED_SIZE,
     max_ratio: int = MAX_COMPRESSION_RATIO,
+    verify_sigs: bool = False,
 ) -> List[Finding]:
     """Run all validation checks on a .meshpack archive."""
     findings: List[Finding] = []
@@ -705,6 +790,19 @@ def validate(
 
     # Sidecar verification (outside ZIP context — reads file from disk)
     findings.extend(verify_sidecar(meshpack_path, sidecar_path, manifest))
+
+    # Signature verification (when requested)
+    if verify_sigs:
+        # Collect signatures from manifest and sidecar
+        all_signatures = manifest.get("signatures", []) if manifest else []
+        pack_hash = manifest.get("pack_hash", "") if manifest else ""
+        if all_signatures and pack_hash:
+            findings.extend(verify_signature_entries(all_signatures, pack_hash))
+        elif all_signatures and not pack_hash:
+            findings.append(
+                Finding(Severity.WARNING, "SIG-006",
+                        "Signatures present but no pack_hash to verify against")
+            )
 
     return findings
 
@@ -747,9 +845,17 @@ def main() -> int:
         default=MAX_COMPRESSION_RATIO,
         help=f"Max compression ratio per entry (default: {MAX_COMPRESSION_RATIO}:1)",
     )
+    parser.add_argument(
+        "--verify-signatures",
+        action="store_true",
+        help="Verify cryptographic signatures (requires 'cryptography' package)",
+    )
     args = parser.parse_args()
 
-    findings = validate(args.meshpack, args.sidecar, args.max_size, args.max_ratio)
+    findings = validate(
+        args.meshpack, args.sidecar, args.max_size, args.max_ratio,
+        verify_sigs=args.verify_signatures,
+    )
 
     # Output
     if args.json_output:
