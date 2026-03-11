@@ -167,8 +167,8 @@ def check_manifest_fields(manifest: dict) -> List[Finding]:
     """Validate required manifest fields and value constraints."""
     findings: List[Finding] = []
 
-    # Required top-level fields
-    required = ["format_version", "created_at", "workspace_id", "hash_algo", "index_summary"]
+    # Required top-level fields (must match manifest.schema.json required array)
+    required = ["format_version", "created_at", "creator_info", "platform_info", "index_summary", "hash_algo", "shard_list"]
     for field in required:
         if field not in manifest:
             findings.append(
@@ -189,19 +189,12 @@ def check_manifest_fields(manifest: dict) -> List[Finding]:
             Finding(Severity.ERROR, "MAN-012", f"Unsupported hash_algo: '{algo}'")
         )
 
-    # shard_list presence (required in v1.0)
-    if "shard_list" not in manifest:
-        findings.append(
-            Finding(
-                Severity.WARNING,
-                "MAN-013",
-                "Missing shard_list in manifest. Required for v1.0 packs.",
+    # shard_list structure validation
+    if "shard_list" in manifest:
+        if not isinstance(manifest["shard_list"], list) or len(manifest["shard_list"]) < 1:
+            findings.append(
+                Finding(Severity.ERROR, "MAN-014", "shard_list must be a non-empty array")
             )
-        )
-    elif not isinstance(manifest["shard_list"], list) or len(manifest["shard_list"]) < 1:
-        findings.append(
-            Finding(Severity.ERROR, "MAN-014", "shard_list must be a non-empty array")
-        )
 
     # index_summary
     summary = manifest.get("index_summary")
