@@ -212,7 +212,7 @@ File dependencies for multi-file formats (OBJ+MTL, FBX with textures).
 | `can_nest` | SLS/MJF | Whether multiple copies can be packed |
 | `has_bridging` | FDM | Unsupported horizontal spans |
 
-### `meshsync_content` (Planned)
+### `meshsync_content`
 
 Rich content metadata for marketplace listings and display.
 
