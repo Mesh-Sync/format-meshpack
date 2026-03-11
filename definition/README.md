@@ -123,6 +123,21 @@ The optional `mapping.db` SQLite file is a **local acceleration cache** for cons
 - Verifiers MUST NOT include `mapping.db` in `pack_hash` computation
 - Consumers SHOULD regenerate `mapping.db` from shards if integrity is critical
 
+> **Implementation status**: As of v1.1, no standard tooling generates or
+> consumes `mapping.db`. Implementers are NOT required to support it.
+> This feature MAY be promoted to a formal extension or removed in a future
+> major version.
+
+If implementing, use the following minimal SQLite schema:
+
+```sql
+CREATE TABLE file_index (
+    path         TEXT PRIMARY KEY,
+    shard_id     TEXT NOT NULL,
+    entry_index  INTEGER NOT NULL
+);
+```
+
 ---
 
 ## 4. Manifest Schema (`manifest.json`)
