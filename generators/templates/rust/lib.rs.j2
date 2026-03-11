@@ -41,6 +41,8 @@ pub struct {{ model.name }} {
         {{ "u64" if field.required else "Option<u64>" }}
         {%- elif field.type.base == "boolean" -%}
         {{ "bool" if field.required else "Option<bool>" }}
+        {%- elif field.type.base == "number" -%}
+        {{ "f64" if field.required else "Option<f64>" }}
         {%- elif field.type.base == "datetime" -%}
         {{ "DateTime<Utc>" if field.required else "Option<DateTime<Utc>>" }}
         {%- elif field.type.base == "email" -%}
@@ -156,3 +158,43 @@ impl MeshPackReader {
             .collect())
     }
 }
+
+// ================== Extension Types ==================
+
+{% for ext in extensions %}
+{% for version_name, ext_models in ext.version_models.items() %}
+{% for model in ext_models %}
+/// {{ ext.name }} {{ version_name }}{% if not model.is_root %} ({{ model.name }}){% endif %} extension data
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct {{ model.name }} {
+{% for field in model.fields %}
+    #[serde(skip_serializing_if = "Option::is_none")]
+{% if field.type.is_inline_class %}
+    pub {{ field.name }}: Option<{{ field.type.base }}>,
+{% elif field.type.is_array %}
+{% if field.type.item_type.base == "string" %}
+    pub {{ field.name }}: Option<Vec<String>>,
+{% elif field.type.item_type.base == "integer" %}
+    pub {{ field.name }}: Option<Vec<u64>>,
+{% elif field.type.item_type.base == "number" %}
+    pub {{ field.name }}: Option<Vec<f64>>,
+{% else %}
+    pub {{ field.name }}: Option<Vec<serde_json::Value>>,
+{% endif %}
+{% elif field.type.base == "string" %}
+    pub {{ field.name }}: Option<String>,
+{% elif field.type.base == "integer" %}
+    pub {{ field.name }}: Option<u64>,
+{% elif field.type.base == "number" %}
+    pub {{ field.name }}: Option<f64>,
+{% elif field.type.base == "boolean" %}
+    pub {{ field.name }}: Option<bool>,
+{% else %}
+    pub {{ field.name }}: Option<serde_json::Value>,
+{% endif %}
+{% endfor %}
+}
+
+{% endfor %}
+{% endfor %}
+{% endfor %}

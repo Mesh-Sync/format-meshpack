@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -14,9 +15,15 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from tools.meshpack_validate import jcs_canonicalize, compute_digest  # noqa: E402
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 VALID_DIR = FIXTURES_DIR / "valid"
 INVALID_DIR = FIXTURES_DIR / "invalid"
+
+_SENTINEL = object()
 
 
 # ---------------------------------------------------------------------------
@@ -64,18 +71,31 @@ class MeshPackBuilder:
         self._manifest.pop(key, None)
         return self
 
+    def _compute_entries_hash(self, entries: List[Dict[str, Any]]) -> str:
+        """Compute entries_hash per REQ-L2-010 using RFC 8785 (JCS)."""
+        algo = self._manifest.get("hash_algo", "sha256")
+        sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
+        encoded = jcs_canonicalize(sorted_entries).encode("utf-8")
+        digest = compute_digest([encoded], algo)
+        return f"{algo}:{digest}"
+
     def add_shard(
         self,
         shard_id: str,
         entries: List[Dict[str, Any]],
         entries_count: Optional[int] = None,
-        entries_hash: Optional[str] = None,
+        entries_hash: Any = _SENTINEL,
     ) -> "MeshPackBuilder":
         self._shards[shard_id] = {
             "shard_id": shard_id,
             "format_version": "1.0.0",
             "entries": entries,
         }
+
+        # Auto-compute entries_hash via JCS when not explicitly provided
+        if entries_hash is _SENTINEL:
+            entries_hash = self._compute_entries_hash(entries)
+
         if entries_count is not None:
             self._shards[shard_id]["entries_count"] = entries_count
         if entries_hash is not None:
@@ -162,6 +182,7 @@ def minimal_valid_entry() -> Dict[str, Any]:
     """A minimal valid FileEntry."""
     return {
         "path": "models/cube.stl",
+        "original_name": "cube.stl",
         "size_bytes": 1234,
         "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "modified_at": "2026-01-01T00:00:00+00:00",

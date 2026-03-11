@@ -242,6 +242,47 @@ def render_template(template_path, context, output_path):
         f.write(output)
     print(f"Generated: {output_path}")
 
+def extract_extension_version_models(ext_name, version_name, version_schema):
+    """Extract typed models from an extension version schema."""
+    models = []
+    root_name = snake_to_pascal(ext_name) + snake_to_pascal(version_name)
+
+    properties = version_schema.get('properties', {})
+    fields = []
+
+    for prop_name, prop_def in properties.items():
+        type_info = get_type_info(prop_def, prop_name)
+
+        if type_info.get('is_inline_class'):
+            inline_name = snake_to_pascal(prop_name)
+            inline_fields = []
+            for ipname, ipdef in type_info['properties'].items():
+                itype_info = get_type_info(ipdef, ipname)
+                inline_fields.append({
+                    'name': ipname,
+                    'type': itype_info,
+                    'required': False
+                })
+            models.append({
+                'name': inline_name,
+                'fields': inline_fields,
+                'is_root': False
+            })
+
+        fields.append({
+            'name': prop_name,
+            'type': type_info,
+            'required': False
+        })
+
+    models.insert(0, {
+        'name': root_name,
+        'fields': fields,
+        'is_root': True
+    })
+
+    return models
+
 
 def load_extension_schemas():
     """Load all extension schemas from the extensions/ directory."""
@@ -249,7 +290,7 @@ def load_extension_schemas():
     if not os.path.exists(EXTENSIONS_DIR):
         return extensions
 
-    for filename in os.listdir(EXTENSIONS_DIR):
+    for filename in sorted(os.listdir(EXTENSIONS_DIR)):
         if filename.endswith('.schema.json'):
             filepath = os.path.join(EXTENSIONS_DIR, filename)
             with open(filepath, 'r') as f:
@@ -257,11 +298,16 @@ def load_extension_schemas():
                 # Extract extension name from filename:
                 # meshsync_geometry.schema.json -> meshsync_geometry
                 ext_name = filename.replace('.schema.json', '')
+                version_models = {}
+                for version_name, version_schema in schema.get('properties', {}).items():
+                    version_models[version_name] = extract_extension_version_models(
+                        ext_name, version_name, version_schema
+                    )
                 extensions.append({
                     'name': ext_name,
                     'schema': schema,
-                    # e.g., ['v1', 'v2']
-                    'versions': list(schema.get('properties', {}).keys())
+                    'versions': list(schema.get('properties', {}).keys()),
+                    'version_models': version_models
                 })
     return extensions
 

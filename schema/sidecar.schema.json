@@ -17,14 +17,12 @@
       "description": "Size of the .meshpack file in bytes, for quick sanity check before hashing"
     },
     "hash_algo": {
-      "type": "string",
-      "enum": ["sha256", "sha512", "blake3"],
+      "allOf": [{ "$ref": "common.schema.json#/definitions/hashAlgorithm" }],
       "description": "Algorithm used to compute pack_hash. MUST match manifest.hash_algo."
     },
     "pack_hash": {
-      "type": "string",
-      "description": "The AUTHORITATIVE hash of the .meshpack archive bytes (excluding items listed in 'exclusions'). Verifiers MUST use this value, not manifest.pack_hash.",
-      "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+      "allOf": [{ "$ref": "common.schema.json#/definitions/hashValue" }],
+      "description": "The AUTHORITATIVE hash of the .meshpack archive bytes (excluding items listed in 'exclusions'). Verifiers MUST use this value, not manifest.pack_hash."
     },
     "computed_at": {
       "type": "string",
@@ -41,31 +39,7 @@
       "type": "array",
       "description": "Cryptographic signatures over pack_hash for authenticity verification",
       "items": {
-        "type": "object",
-        "required": ["alg", "public_key", "signature"],
-        "properties": {
-          "alg": {
-            "type": "string",
-            "enum": ["ed25519", "rsa-pss-sha256"],
-            "description": "Signature algorithm"
-          },
-          "public_key": {
-            "type": "string",
-            "description": "Base64-encoded public key"
-          },
-          "signature": {
-            "type": "string",
-            "description": "Base64-encoded signature over the pack_hash string bytes"
-          },
-          "signer_id": {
-            "type": "string",
-            "description": "Optional identifier of the signer (email, key ID, etc.)"
-          },
-          "signed_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
+        "$ref": "common.schema.json#/definitions/signatureEntry"
       }
     },
     "extensions": {
