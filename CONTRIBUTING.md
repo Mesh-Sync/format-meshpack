@@ -86,6 +86,11 @@ Edit JSON Schema files in `schema/`:
 - `shard.schema.json` - Index shard and file entry definitions
 - `sidecar.schema.json` - Detached integrity sidecar
 - `common.schema.json` - Shared type definitions (canonical reference)
+- `extensions/meshsync_geometry.schema.json` - Geometry analysis metadata
+- `extensions/meshsync_printability.schema.json` - Print analysis metadata
+- `extensions/meshsync_dependencies.schema.json` - Material/texture references
+- `extensions/meshsync_content.schema.json` - Content metadata (title, tags)
+- `extensions/meshsync_thumbnails.schema.json` - Thumbnail/preview references
 
 After editing, validate:
 ```bash
