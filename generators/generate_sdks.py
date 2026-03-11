@@ -109,6 +109,9 @@ def get_type_info(prop, prop_name, definitions=None):
     if t == "integer":
         return {"base": "integer", "is_primitive": True}
 
+    if t == "number":
+        return {"base": "number", "is_primitive": True}
+
     if t == "boolean":
         return {"base": "boolean", "is_primitive": True}
 

@@ -138,42 +138,97 @@ def set_extension(
     return extensions
 
 
-# ----- Typed Extension Accessors -----
+# ----- Typed Extension Models -----
 
 {% for ext in extensions %}
+{% for version_name, ext_models in ext.version_models.items() %}
+{% for model in ext_models %}
+{% if not model.is_root %}
 @dataclass
-class {{ ext.name | replace('meshsync_', '') | title | replace('_', '') }}V1:
-    """Typed accessor for {{ ext.name }} v1 extension data."""
-    data: Dict[str, Any]
-    
+class {{ model.name }}:
+    """{{ ext.name }} {{ version_name }} sub-type: {{ model.name }}"""
+{% for field in model.fields %}
+    {{ field.name }}: Optional[{% if field.type.is_inline_class -%}
+{{ field.type.base }}
+{%- elif field.type.is_array -%}
+List[{% if field.type.item_type.base == "string" %}str{% elif field.type.item_type.base == "integer" %}int{% elif field.type.item_type.base == "number" %}float{% else %}Any{% endif %}]
+{%- elif field.type.base == "string" -%}
+str
+{%- elif field.type.base == "integer" -%}
+int
+{%- elif field.type.base == "number" -%}
+float
+{%- elif field.type.base == "boolean" -%}
+bool
+{%- elif field.type.base == "dictionary" -%}
+Dict[str, Any]
+{%- else -%}
+Any
+{%- endif %}] = None
+{% endfor %}
+
     @classmethod
-    def from_extensions(cls, extensions: Dict[str, Any]) -> Optional['{{ ext.name | replace("meshsync_", "") | title | replace("_", "") }}V1']:
-        """Extract {{ ext.name }} v1 from extensions dict."""
-        v, d = get_extension_version(extensions, "{{ ext.name }}", "v1"), None
-        if v is None:
-            _, d = get_best_extension(extensions, "{{ ext.name }}", "v1")
-        else:
-            d = v
+    def from_dict(cls, data: Dict[str, Any]) -> '{{ model.name }}':
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+{% endif %}
+{% endfor %}
+{% for model in ext_models %}
+{% if model.is_root %}
+@dataclass
+class {{ model.name }}:
+    """Typed model for {{ ext.name }} {{ version_name }} extension data."""
+{% for field in model.fields %}
+    {{ field.name }}: Optional[{% if field.type.is_inline_class -%}
+{{ field.type.base }}
+{%- elif field.type.is_array -%}
+List[{% if field.type.item_type.base == "string" %}str{% elif field.type.item_type.base == "integer" %}int{% elif field.type.item_type.base == "number" %}float{% else %}Any{% endif %}]
+{%- elif field.type.base == "string" -%}
+str
+{%- elif field.type.base == "integer" -%}
+int
+{%- elif field.type.base == "number" -%}
+float
+{%- elif field.type.base == "boolean" -%}
+bool
+{%- elif field.type.base == "dictionary" -%}
+Dict[str, Any]
+{%- else -%}
+Any
+{%- endif %}] = None
+{% endfor %}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> '{{ model.name }}':
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    @classmethod
+    def from_extensions(cls, extensions: Dict[str, Any]) -> Optional['{{ model.name }}']:
+        """Extract {{ ext.name }} {{ version_name }} from extensions dict."""
+        d = get_extension_version(extensions, "{{ ext.name }}", "{{ version_name }}")
+        if d is None:
+            _, d = get_best_extension(extensions, "{{ ext.name }}", "{{ version_name }}")
         if d is None:
             return None
-        return cls(data=d)
-    
-    def get(self, key: str, default: Any = None) -> Any:
-        """Get a field from the extension data."""
-        return self.data.get(key, default)
+        return cls.from_dict(d)
 
+{% endif %}
+{% endfor %}
+{% endfor %}
 {% endfor %}
 
 # ----- Convenience Functions -----
 
-def get_geometry(extensions: Dict[str, Any]) -> Optional[GeometryV1]:
-    """Get meshsync_geometry extension (v1)."""
-    return GeometryV1.from_extensions(extensions)
+{% for ext in extensions %}
+{% for version_name, ext_models in ext.version_models.items() %}
+{% for model in ext_models %}
+{% if model.is_root %}
+{% set func_name = ext.name | replace('meshsync_', '') | title | replace('_', '') %}
+def get_{{ ext.name | replace('meshsync_', '') }}(extensions: Dict[str, Any]) -> Optional[{{ model.name }}]:
+    """Get {{ ext.name }} {{ version_name }} extension."""
+    return {{ model.name }}.from_extensions(extensions)
 
-def get_dependencies(extensions: Dict[str, Any]) -> Optional[DependenciesV1]:
-    """Get meshsync_dependencies extension (v1)."""
-    return DependenciesV1.from_extensions(extensions)
-
-def get_printability(extensions: Dict[str, Any]) -> Optional[PrintabilityV1]:
-    """Get meshsync_printability extension (v1)."""
-    return PrintabilityV1.from_extensions(extensions)
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% endfor %}
