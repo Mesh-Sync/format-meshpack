@@ -75,7 +75,7 @@ class MeshPackBuilder:
         """Compute entries_hash per REQ-L2-010 using RFC 8785 (JCS)."""
         algo = self._manifest.get("hash_algo", "sha256")
         sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
-        encoded = jcs_canonicalize(sorted_entries).encode("utf-8")
+        encoded = jcs_canonicalize(sorted_entries)
         digest = compute_digest([encoded], algo)
         return f"{algo}:{digest}"
 

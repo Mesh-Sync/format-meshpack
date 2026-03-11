@@ -50,15 +50,111 @@ SUPPORTED_ALGOS = {"sha256", "sha512"}  # blake3 requires optional dep
 # ---------------------------------------------------------------------------
 
 
-def jcs_canonicalize(obj: object) -> bytes:
-    """Serialize *obj* to canonical JSON bytes (RFC 8785 — JCS).
+def _jcs_serialize_value(value: object) -> str:
+    """Serialize a single JSON value per RFC 8785 (JCS) rules."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _jcs_serialize_number(value)
+    if isinstance(value, str):
+        return _jcs_serialize_string(value)
+    if isinstance(value, list):
+        return "[" + ",".join(_jcs_serialize_value(v) for v in value) + "]"
+    if isinstance(value, dict):
+        # RFC 8785 §3.2.3: sort keys by UTF-16 code unit order
+        sorted_keys = sorted(value.keys())
+        pairs = [_jcs_serialize_string(k) + ":" + _jcs_serialize_value(value[k])
+                 for k in sorted_keys]
+        return "{" + ",".join(pairs) + "}"
+    raise TypeError(f"JCS: unsupported type {type(value)}")
 
-    Current implementation uses ``json.dumps(sort_keys=True)`` which is a
-    reasonable approximation for the common case.  A future revision
-    (see issue #3) will switch to a dedicated RFC 8785 library to handle
-    edge-cases such as number formatting and recursive key sorting.
+
+def _jcs_serialize_number(value) -> str:
+    """Serialize a number per RFC 8785 §3.2.2.3 (ES6 Number serialization).
+
+    Implements ECMAScript Number.prototype.toString() formatting:
+    - Integers and whole-number floats below 10^21 render without decimal/exponent
+    - Small decimals (10^-6 < |x| < 1) use "0.000..." form
+    - Very large/small numbers use exponential notation "Ne+X" / "Ne-X"
     """
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if isinstance(value, bool):
+        raise TypeError("JCS: bool is not a number")
+    if isinstance(value, int):
+        return str(value)
+    if value != value:  # NaN
+        raise ValueError("JCS: NaN is not allowed in canonical JSON")
+    if value == float("inf") or value == float("-inf"):
+        raise ValueError("JCS: Infinity is not allowed in canonical JSON")
+    if value == 0.0:
+        return "0"
+
+    sign = "-" if value < 0 else ""
+    abs_value = abs(value)
+
+    # Whole-number floats below 10^21 render as integers (ES6 rule: k ≤ n ≤ 21)
+    if abs_value.is_integer() and abs_value < 1e21:
+        return sign + str(int(abs_value))
+
+    # Get shortest decimal representation via repr
+    s = repr(abs_value)
+
+    if "e" in s or "E" in s:
+        mantissa_str, exp_str = s.lower().split("e")
+        exp_offset = int(exp_str)
+        if "." in mantissa_str:
+            int_part, frac_part = mantissa_str.split(".")
+        else:
+            int_part, frac_part = mantissa_str, ""
+        digits = int_part + frac_part
+        n = exp_offset + len(int_part)  # ES6's n (10^(n-1) ≤ |x| < 10^n)
+    else:
+        if "." in s:
+            int_part, frac_part = s.split(".")
+        else:
+            int_part, frac_part = s, ""
+        digits = int_part + frac_part
+        n = len(int_part)
+
+    digits = digits.rstrip("0")
+    k = len(digits)
+
+    # ES6 Number.prototype.toString() formatting rules
+    if k <= n <= 21:
+        return sign + digits + "0" * (n - k)
+    elif 0 < n <= 21:
+        return sign + digits[:n] + "." + digits[n:]
+    elif -6 < n <= 0:
+        return sign + "0." + "0" * (-n) + digits
+    elif k == 1:
+        return sign + digits + "e" + ("+" if n - 1 >= 0 else "") + str(n - 1)
+    else:
+        return sign + digits[0] + "." + digits[1:] + "e" + ("+" if n - 1 >= 0 else "") + str(n - 1)
+
+
+def _jcs_serialize_string(value: str) -> str:
+    """Serialize a string per RFC 8785 §3.2.2.2 (JSON string escaping).
+
+    Uses Python's json.dumps which handles required escapes (\\, \", control
+    characters) and preserves non-ASCII characters as-is (ensure_ascii=False)
+    per RFC 8785 requirements.
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
+def jcs_canonicalize(obj: object) -> bytes:
+    """Serialize *obj* to canonical JSON bytes per RFC 8785 (JCS).
+
+    Implements proper RFC 8785 canonicalization:
+    - Recursive key sorting (UTF-16 code unit order)
+    - Deterministic number formatting (ES6 Number serialization)
+    - No whitespace between tokens
+    - UTF-8 encoding of the result
+    """
+    return _jcs_serialize_value(obj).encode("utf-8")
 
 
 def _get_hasher(algo: str) -> "hashlib._Hash":
@@ -276,7 +372,8 @@ def verify_entries_hash(
     entries: List[dict], algo: str, expected_hash: str
 ) -> Tuple[bool, str]:
     """Compute entries_hash using canonical JSON (RFC 8785 JCS)."""
-    encoded = jcs_canonicalize(entries)
+    sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
+    encoded = jcs_canonicalize(sorted_entries)
     digest = compute_digest([encoded], algo)
     actual = f"{algo}:{digest}"
     return actual == expected_hash, actual

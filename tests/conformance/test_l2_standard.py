@@ -198,14 +198,14 @@ class TestEntriesHashRFC8785:
         jcs_out = jcs_canonicalize(data)
         naive_out = json.dumps(data, sort_keys=True, separators=(",", ":"))
         # Python's json.dumps with ensure_ascii=True escapes the e-acute
-        assert "caf\u00e9" in jcs_out, "JCS must pass non-ASCII through verbatim"
+        assert "caf\u00e9".encode() in jcs_out, "JCS must pass non-ASCII through verbatim"
         assert "\\u00e9" in naive_out, "json.dumps should escape non-ASCII by default"
 
     def test_jcs_recursive_key_sorting(self) -> None:
         """Keys must be sorted recursively through nested objects."""
         data = {"z": {"b": 2, "a": 1}, "a": 0}
         result = jcs_canonicalize(data)
-        assert result == '{"a":0,"z":{"a":1,"b":2}}'
+        assert result == b'{"a":0,"z":{"a":1,"b":2}}'
 
     def test_jcs_number_integer(self) -> None:
         """Integers must be rendered without decimal point."""
@@ -268,7 +268,7 @@ class TestEntriesHashRFC8785:
         }
         # Compute the expected hash from sorted order
         sorted_entries = [entry_a, entry_z]
-        canonical = jcs_canonicalize(sorted_entries).encode("utf-8")
+        canonical = jcs_canonicalize(sorted_entries)
         expected = "sha256:" + hashlib.sha256(canonical).hexdigest()
 
         # Pass entries in reverse order -- hash should still match
