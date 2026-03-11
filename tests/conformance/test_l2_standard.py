@@ -350,3 +350,55 @@ class TestResourceRefFormat:
             assert any("RES-003" in f.code for f in warnings)
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# BLAKE3 hash algorithm support
+# ---------------------------------------------------------------------------
+
+blake3 = pytest.importorskip("blake3", reason="blake3 package not installed")
+
+
+class TestBlake3Support:
+    """Verify that archives using BLAKE3 hash_algo pass validation."""
+
+    def _blake3_hash(self, data: bytes) -> str:
+        return "blake3:" + blake3.blake3(data).hexdigest()
+
+    def test_blake3_hash_accepted(self, pack_builder: MeshPackBuilder) -> None:
+        """A pack with hash_algo=blake3 and correct hashes must pass."""
+        pack_builder.set_manifest_field("hash_algo", "blake3")
+        entry = {
+            "path": "models/cube.stl",
+            "original_name": "cube.stl",
+            "size_bytes": 1234,
+            "hash": self._blake3_hash(b"test-content"),
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        path = pack_builder.add_shard("part-00001", [entry], entries_count=1).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            algo_errors = [f for f in errors if "blake3" in f.message.lower() or "MAN-012" in f.code]
+            assert not algo_errors, f"Unexpected blake3-related errors: {algo_errors}"
+        finally:
+            os.unlink(path)
+
+    def test_blake3_entries_hash_verified(self, pack_builder: MeshPackBuilder) -> None:
+        """entries_hash with blake3 must be verified correctly."""
+        pack_builder.set_manifest_field("hash_algo", "blake3")
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": self._blake3_hash(b"data"),
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        path = pack_builder.add_shard("part-00001", [entry], entries_count=1).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            hash_errors = [f for f in errors if f.code == "SHD-007"]
+            assert not hash_errors, f"BLAKE3 entries_hash mismatch: {hash_errors}"
+        finally:
+            os.unlink(path)

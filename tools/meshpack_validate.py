@@ -43,7 +43,7 @@ PATH_TRAVERSAL_PATTERN = re.compile(r"(^|/)\.\.(/|$)")
 HASH_PATTERN = re.compile(
     r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
 )
-SUPPORTED_ALGOS = {"sha256", "sha512"}  # blake3 requires optional dep
+SUPPORTED_ALGOS = {"sha256", "sha512", "blake3"}
 
 # ---------------------------------------------------------------------------
 # Hash helpers
