@@ -76,6 +76,31 @@ class TestZipCompression:
 
 
 # ---------------------------------------------------------------------------
+# FR-053: zip bomb protection
+# ---------------------------------------------------------------------------
+
+class TestZipBombProtection:
+    def test_normal_archive_passes(self, tmp_meshpack: str) -> None:
+        """Normal archives should not trigger zip bomb errors."""
+        findings = validate(tmp_meshpack)
+        bomb_errors = [f for f in findings if f.code in ("ZIP-004", "ZIP-005")]
+        assert not bomb_errors
+
+    def test_low_ratio_triggers_zip004(self, tmp_meshpack: str) -> None:
+        """An archive exceeding a very low max_ratio should produce ZIP-004."""
+        # Use max_ratio=1 — any DEFLATED entry will have ratio > 1
+        findings = validate(tmp_meshpack, max_ratio=1)
+        ratio_errors = [f for f in findings if f.code == "ZIP-004"]
+        assert ratio_errors, "Expected ZIP-004 for max_ratio=1"
+
+    def test_low_max_size_triggers_zip005(self, tmp_meshpack: str) -> None:
+        """An archive exceeding a very low max_size should produce ZIP-005."""
+        findings = validate(tmp_meshpack, max_size=1)
+        size_errors = [f for f in findings if f.code == "ZIP-005"]
+        assert size_errors, "Expected ZIP-005 for max_size=1"
+
+
+# ---------------------------------------------------------------------------
 # REQ-L2-001: shard_list MUST be present and non-empty
 # ---------------------------------------------------------------------------
 

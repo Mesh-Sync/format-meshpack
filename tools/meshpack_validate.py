@@ -278,6 +278,50 @@ def check_zip_compression(zf: zipfile.ZipFile) -> List[Finding]:
     return findings
 
 
+# Default zip bomb limits
+MAX_DECOMPRESSED_SIZE = 10 * 1024**3  # 10 GB
+MAX_COMPRESSION_RATIO = 100           # 100:1
+
+
+def check_zip_bomb(
+    zf: zipfile.ZipFile,
+    max_size: int = MAX_DECOMPRESSED_SIZE,
+    max_ratio: int = MAX_COMPRESSION_RATIO,
+) -> List[Finding]:
+    """FR-053: zip bomb protection — check decompression ratio and total size."""
+    findings: List[Finding] = []
+    total_decompressed = 0
+
+    for info in zf.infolist():
+        total_decompressed += info.file_size
+
+        if info.compress_size > 0:
+            ratio = info.file_size / info.compress_size
+            if ratio > max_ratio:
+                findings.append(
+                    Finding(
+                        Severity.ERROR,
+                        "ZIP-004",
+                        f"Entry '{info.filename}' has compression ratio {ratio:.0f}:1 "
+                        f"(limit: {max_ratio}:1) — possible zip bomb",
+                    )
+                )
+
+    if total_decompressed > max_size:
+        size_gb = total_decompressed / 1024**3
+        limit_gb = max_size / 1024**3
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ZIP-005",
+                f"Total decompressed size {size_gb:.1f} GB exceeds limit of "
+                f"{limit_gb:.1f} GB — possible zip bomb",
+            )
+        )
+
+    return findings
+
+
 def check_manifest_fields(manifest: dict) -> List[Finding]:
     """Validate required manifest fields and value constraints."""
     findings: List[Finding] = []
@@ -621,7 +665,12 @@ def verify_sidecar(
 # ---------------------------------------------------------------------------
 
 
-def validate(meshpack_path: str, sidecar_path: Optional[str] = None) -> List[Finding]:
+def validate(
+    meshpack_path: str,
+    sidecar_path: Optional[str] = None,
+    max_size: int = MAX_DECOMPRESSED_SIZE,
+    max_ratio: int = MAX_COMPRESSION_RATIO,
+) -> List[Finding]:
     """Run all validation checks on a .meshpack archive."""
     findings: List[Finding] = []
 
@@ -638,6 +687,9 @@ def validate(meshpack_path: str, sidecar_path: Optional[str] = None) -> List[Fin
 
         # ZIP compression methods
         findings.extend(check_zip_compression(zf))
+
+        # Zip bomb protection
+        findings.extend(check_zip_bomb(zf, max_size, max_ratio))
 
         # Manifest
         manifest, man_findings = load_manifest(zf)
@@ -683,9 +735,21 @@ def main() -> int:
         dest="json_output",
         help="Output findings as JSON array",
     )
+    parser.add_argument(
+        "--max-size",
+        type=int,
+        default=MAX_DECOMPRESSED_SIZE,
+        help=f"Max total decompressed size in bytes (default: {MAX_DECOMPRESSED_SIZE})",
+    )
+    parser.add_argument(
+        "--max-ratio",
+        type=int,
+        default=MAX_COMPRESSION_RATIO,
+        help=f"Max compression ratio per entry (default: {MAX_COMPRESSION_RATIO}:1)",
+    )
     args = parser.parse_args()
 
-    findings = validate(args.meshpack, args.sidecar)
+    findings = validate(args.meshpack, args.sidecar, args.max_size, args.max_ratio)
 
     # Output
     if args.json_output:
