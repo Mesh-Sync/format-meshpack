@@ -127,10 +127,10 @@ class MeshPackBuilder:
         self._manifest_first = False
         return self
 
-    def build(self) -> bytes:
+    def build(self, compression: int = zipfile.ZIP_DEFLATED) -> bytes:
         """Build the .meshpack ZIP archive as bytes."""
         buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(buf, "w", compression) as zf:
             manifest_bytes = json.dumps(self._manifest, indent=2).encode("utf-8")
 
             if self._manifest_first:
@@ -156,9 +156,9 @@ class MeshPackBuilder:
 
         return buf.getvalue()
 
-    def build_to_file(self, path: Optional[str] = None) -> str:
+    def build_to_file(self, path: Optional[str] = None, compression: int = zipfile.ZIP_DEFLATED) -> str:
         """Build and write to a temporary file. Returns file path."""
-        data = self.build()
+        data = self.build(compression=compression)
         if path is None:
             fd, path = tempfile.mkstemp(suffix=".meshpack")
             os.close(fd)

@@ -52,6 +52,30 @@ class TestZipOrdering:
 
 
 # ---------------------------------------------------------------------------
+# Spec §2.1: only DEFLATE or STORE compression methods
+# ---------------------------------------------------------------------------
+
+class TestZipCompression:
+    def test_deflate_accepted(self, tmp_meshpack: str) -> None:
+        """DEFLATE compression must not produce ZIP-003."""
+        findings = validate(tmp_meshpack)
+        errors = [f for f in findings if f.code == "ZIP-003"]
+        assert not errors
+
+    def test_bzip2_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """Archive with BZIP2 compressed entries should produce ZIP-003."""
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file(
+            compression=zipfile.ZIP_BZIP2
+        )
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.code == "ZIP-003"]
+            assert errors, "Expected ZIP-003 error for BZIP2 compression"
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
 # REQ-L2-001: shard_list MUST be present and non-empty
 # ---------------------------------------------------------------------------
 

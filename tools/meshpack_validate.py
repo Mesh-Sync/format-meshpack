@@ -259,6 +259,25 @@ def check_zip_ordering(zf: zipfile.ZipFile) -> List[Finding]:
     return findings
 
 
+ALLOWED_COMPRESSION = {zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED}
+
+
+def check_zip_compression(zf: zipfile.ZipFile) -> List[Finding]:
+    """Spec §2.1: only DEFLATE (8) or STORE (0) compression allowed."""
+    findings: List[Finding] = []
+    for info in zf.infolist():
+        if info.compress_type not in ALLOWED_COMPRESSION:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "ZIP-003",
+                    f"Entry '{info.filename}' uses unsupported compression method "
+                    f"{info.compress_type} (only DEFLATE/STORE allowed)",
+                )
+            )
+    return findings
+
+
 def check_manifest_fields(manifest: dict) -> List[Finding]:
     """Validate required manifest fields and value constraints."""
     findings: List[Finding] = []
@@ -616,6 +635,9 @@ def validate(meshpack_path: str, sidecar_path: Optional[str] = None) -> List[Fin
     with zf:
         # ZIP ordering
         findings.extend(check_zip_ordering(zf))
+
+        # ZIP compression methods
+        findings.extend(check_zip_compression(zf))
 
         # Manifest
         manifest, man_findings = load_manifest(zf)
