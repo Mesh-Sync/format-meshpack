@@ -21,8 +21,15 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
 ## Repository Structure
 
 - **[`definition/`](definition/README.md)**: The human-readable specification (RFC-style). **Start here.**
-- **[`schema/`](schema/)**: Canonical JSON Schemas (`manifest.schema.json`, `shard.schema.json`, `sidecar.schema.json`, `common.schema.json`) used for validation and code generation.
+- **[`schema/`](schema/)**: Canonical JSON Schemas used for validation and code generation.
+  - `manifest.schema.json`, `shard.schema.json`, `sidecar.schema.json`, `common.schema.json`
+  - `extensions/` — versioned extension schemas:
+    `meshsync_geometry`, `meshsync_printability`, `meshsync_dependencies`, `meshsync_content`, `meshsync_thumbnails`
 - **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas.
+- **[`tools/`](tools/)**: Standalone tools (`meshpack_validate.py` — archive validator with JCS, signature, and path security checks).
+- **[`tests/conformance/`](tests/conformance/)**: Conformance test suite (L1/L2/L3) with static fixture archives.
+- **[`samples/`](samples/)**: Example manifest and shard JSON files.
+- **[`docs/`](docs/)**: Additional documentation (geometry canonical field names, etc.).
 - **[`generated/`](generated/)**: (Gitignored) The output directory for generated SDKs.
 
 ## Usage
