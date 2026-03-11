@@ -408,9 +408,29 @@ def check_entry_path(entry: dict, shard_path: str) -> List[Finding]:
     if path.startswith("/"):
         findings.append(
             Finding(
-                Severity.WARNING,
+                Severity.ERROR,
                 "ENT-003",
                 f"Absolute path in {shard_path}: {path}",
+            )
+        )
+
+    # Windows drive letter paths (e.g., C:\Users\file.stl)
+    if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ENT-004",
+                f"Drive letter path in {shard_path}: {path}",
+            )
+        )
+
+    # UNC paths (e.g., \\server\share\file.stl)
+    if path.startswith("\\\\"):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ENT-005",
+                f"UNC path in {shard_path}: {path}",
             )
         )
 

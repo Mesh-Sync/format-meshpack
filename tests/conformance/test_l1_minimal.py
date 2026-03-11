@@ -176,3 +176,36 @@ class TestPathTraversal:
             assert any("ENT-002" in f.code for f in errors)
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# REQ-L1-013: Paths MUST NOT be absolute, use drive letters, or UNC paths
+# ---------------------------------------------------------------------------
+
+@pytest.mark.REQ_L1_013
+class TestPathSecurityNegative:
+    @pytest.mark.parametrize("bad_path,expected_code", [
+        ("/root/secret.stl", "ENT-003"),
+        ("/etc/passwd", "ENT-003"),
+        ("C:\\Users\\file.stl", "ENT-004"),
+        ("D:\\models\\part.obj", "ENT-004"),
+        ("\\\\server\\share\\file.stl", "ENT-005"),
+    ])
+    def test_reject_dangerous_paths(
+        self, pack_builder: MeshPackBuilder, bad_path: str, expected_code: str
+    ) -> None:
+        """Absolute, drive letter, and UNC paths must be rejected."""
+        entry = {
+            "path": bad_path,
+            "size_bytes": 0,
+            "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        path = pack_builder.add_shard("part-00001", [entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(expected_code in f.code for f in errors), \
+                f"Expected {expected_code} for path '{bad_path}', got: {[f.code for f in errors]}"
+        finally:
+            os.unlink(path)

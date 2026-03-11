@@ -76,7 +76,12 @@ class MeshPackBuilder:
         algo = self._manifest.get("hash_algo", "sha256")
         sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
         encoded = jcs_canonicalize(sorted_entries)
-        digest = compute_digest([encoded], algo)
+        try:
+            digest = compute_digest([encoded], algo)
+        except ValueError:
+            # Unsupported algo (e.g. "md5") — use a placeholder so the pack
+            # can still be built; the validator will flag the bad algo.
+            digest = "0" * 64
         return f"{algo}:{digest}"
 
     def add_shard(
