@@ -75,8 +75,13 @@ class MeshPackBuilder:
         """Compute entries_hash per REQ-L2-010 using RFC 8785 (JCS)."""
         algo = self._manifest.get("hash_algo", "sha256")
         sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
-        encoded = jcs_canonicalize(sorted_entries).encode("utf-8")
-        digest = compute_digest([encoded], algo)
+        encoded = jcs_canonicalize(sorted_entries)
+        try:
+            digest = compute_digest([encoded], algo)
+        except ValueError:
+            # Unsupported algo (e.g. "md5") — use a placeholder so the pack
+            # can still be built; the validator will flag the bad algo.
+            digest = "0" * 64
         return f"{algo}:{digest}"
 
     def add_shard(
@@ -127,10 +132,10 @@ class MeshPackBuilder:
         self._manifest_first = False
         return self
 
-    def build(self) -> bytes:
+    def build(self, compression: int = zipfile.ZIP_DEFLATED) -> bytes:
         """Build the .meshpack ZIP archive as bytes."""
         buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(buf, "w", compression) as zf:
             manifest_bytes = json.dumps(self._manifest, indent=2).encode("utf-8")
 
             if self._manifest_first:
@@ -156,9 +161,9 @@ class MeshPackBuilder:
 
         return buf.getvalue()
 
-    def build_to_file(self, path: Optional[str] = None) -> str:
+    def build_to_file(self, path: Optional[str] = None, compression: int = zipfile.ZIP_DEFLATED) -> str:
         """Build and write to a temporary file. Returns file path."""
-        data = self.build()
+        data = self.build(compression=compression)
         if path is None:
             fd, path = tempfile.mkstemp(suffix=".meshpack")
             os.close(fd)

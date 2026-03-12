@@ -52,6 +52,55 @@ class TestZipOrdering:
 
 
 # ---------------------------------------------------------------------------
+# Spec §2.1: only DEFLATE or STORE compression methods
+# ---------------------------------------------------------------------------
+
+class TestZipCompression:
+    def test_deflate_accepted(self, tmp_meshpack: str) -> None:
+        """DEFLATE compression must not produce ZIP-003."""
+        findings = validate(tmp_meshpack)
+        errors = [f for f in findings if f.code == "ZIP-003"]
+        assert not errors
+
+    def test_bzip2_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """Archive with BZIP2 compressed entries should produce ZIP-003."""
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file(
+            compression=zipfile.ZIP_BZIP2
+        )
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.code == "ZIP-003"]
+            assert errors, "Expected ZIP-003 error for BZIP2 compression"
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# FR-053: zip bomb protection
+# ---------------------------------------------------------------------------
+
+class TestZipBombProtection:
+    def test_normal_archive_passes(self, tmp_meshpack: str) -> None:
+        """Normal archives should not trigger zip bomb errors."""
+        findings = validate(tmp_meshpack)
+        bomb_errors = [f for f in findings if f.code in ("ZIP-004", "ZIP-005")]
+        assert not bomb_errors
+
+    def test_low_ratio_triggers_zip004(self, tmp_meshpack: str) -> None:
+        """An archive exceeding a very low max_ratio should produce ZIP-004."""
+        # Use max_ratio=1 — any DEFLATED entry will have ratio > 1
+        findings = validate(tmp_meshpack, max_ratio=1)
+        ratio_errors = [f for f in findings if f.code == "ZIP-004"]
+        assert ratio_errors, "Expected ZIP-004 for max_ratio=1"
+
+    def test_low_max_size_triggers_zip005(self, tmp_meshpack: str) -> None:
+        """An archive exceeding a very low max_size should produce ZIP-005."""
+        findings = validate(tmp_meshpack, max_size=1)
+        size_errors = [f for f in findings if f.code == "ZIP-005"]
+        assert size_errors, "Expected ZIP-005 for max_size=1"
+
+
+# ---------------------------------------------------------------------------
 # REQ-L2-001: shard_list MUST be present and non-empty
 # ---------------------------------------------------------------------------
 
@@ -198,14 +247,14 @@ class TestEntriesHashRFC8785:
         jcs_out = jcs_canonicalize(data)
         naive_out = json.dumps(data, sort_keys=True, separators=(",", ":"))
         # Python's json.dumps with ensure_ascii=True escapes the e-acute
-        assert "caf\u00e9" in jcs_out, "JCS must pass non-ASCII through verbatim"
+        assert "caf\u00e9".encode() in jcs_out, "JCS must pass non-ASCII through verbatim"
         assert "\\u00e9" in naive_out, "json.dumps should escape non-ASCII by default"
 
     def test_jcs_recursive_key_sorting(self) -> None:
         """Keys must be sorted recursively through nested objects."""
         data = {"z": {"b": 2, "a": 1}, "a": 0}
         result = jcs_canonicalize(data)
-        assert result == '{"a":0,"z":{"a":1,"b":2}}'
+        assert result == b'{"a":0,"z":{"a":1,"b":2}}'
 
     def test_jcs_number_integer(self) -> None:
         """Integers must be rendered without decimal point."""
@@ -268,7 +317,7 @@ class TestEntriesHashRFC8785:
         }
         # Compute the expected hash from sorted order
         sorted_entries = [entry_a, entry_z]
-        canonical = jcs_canonicalize(sorted_entries).encode("utf-8")
+        canonical = jcs_canonicalize(sorted_entries)
         expected = "sha256:" + hashlib.sha256(canonical).hexdigest()
 
         # Pass entries in reverse order -- hash should still match
@@ -324,5 +373,57 @@ class TestResourceRefFormat:
             findings = validate(path)
             warnings = [f for f in findings if f.severity == Severity.WARNING]
             assert any("RES-003" in f.code for f in warnings)
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# BLAKE3 hash algorithm support
+# ---------------------------------------------------------------------------
+
+blake3 = pytest.importorskip("blake3", reason="blake3 package not installed")
+
+
+class TestBlake3Support:
+    """Verify that archives using BLAKE3 hash_algo pass validation."""
+
+    def _blake3_hash(self, data: bytes) -> str:
+        return "blake3:" + blake3.blake3(data).hexdigest()
+
+    def test_blake3_hash_accepted(self, pack_builder: MeshPackBuilder) -> None:
+        """A pack with hash_algo=blake3 and correct hashes must pass."""
+        pack_builder.set_manifest_field("hash_algo", "blake3")
+        entry = {
+            "path": "models/cube.stl",
+            "original_name": "cube.stl",
+            "size_bytes": 1234,
+            "hash": self._blake3_hash(b"test-content"),
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        path = pack_builder.add_shard("part-00001", [entry], entries_count=1).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            algo_errors = [f for f in errors if "blake3" in f.message.lower() or "MAN-012" in f.code]
+            assert not algo_errors, f"Unexpected blake3-related errors: {algo_errors}"
+        finally:
+            os.unlink(path)
+
+    def test_blake3_entries_hash_verified(self, pack_builder: MeshPackBuilder) -> None:
+        """entries_hash with blake3 must be verified correctly."""
+        pack_builder.set_manifest_field("hash_algo", "blake3")
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": self._blake3_hash(b"data"),
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        path = pack_builder.add_shard("part-00001", [entry], entries_count=1).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            hash_errors = [f for f in errors if f.code == "SHD-007"]
+            assert not hash_errors, f"BLAKE3 entries_hash mismatch: {hash_errors}"
         finally:
             os.unlink(path)

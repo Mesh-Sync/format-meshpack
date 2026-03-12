@@ -16,11 +16,16 @@ help:
     @echo "  lint           Run code linters (Python, Rust, TS)"
     @echo "  test           Run tests (Python, Rust, TS)"
     @echo "  publish        Generate, Validate, Compile, Test, Lint and Upload"
+    @echo "  publish-dry-run  Full pipeline without uploading (local verification)"
     @echo "  all            Run compile sequence"
 
 generate:
     @echo "Generating SDKs..."
     python3 generators/generate_sdks.py
+
+generate-fixtures:
+    @echo "Generating static test fixtures..."
+    python3 tests/conformance/generate_fixtures.py
 
 doc:
     @echo "Generating PDF documentation..."
@@ -86,6 +91,20 @@ publish: generate validate lint test compile
     # cargo publish
     # TypeScript
     # npm publish
+
+publish-dry-run: generate validate lint test compile
+    @echo "Dry-run: packing artifacts (no upload)..."
+    @echo "--- Python ---"
+    cd generated/sdks/python && python3 -m build
+    @echo "--- TypeScript ---"
+    if command -v npm >/dev/null 2>&1; then \
+        cd generated/sdks/typescript && npm pack --dry-run; \
+    fi
+    @echo "--- Rust ---"
+    if command -v cargo >/dev/null 2>&1; then \
+        cd generated/sdks/rust/meshpack && cargo package --list; \
+    fi
+    @echo "Dry-run complete. Review output above before tagging a release."
 
 all: generate validate compile
 

@@ -43,11 +43,118 @@ PATH_TRAVERSAL_PATTERN = re.compile(r"(^|/)\.\.(/|$)")
 HASH_PATTERN = re.compile(
     r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
 )
-SUPPORTED_ALGOS = {"sha256", "sha512"}  # blake3 requires optional dep
+SUPPORTED_ALGOS = {"sha256", "sha512", "blake3"}
 
 # ---------------------------------------------------------------------------
 # Hash helpers
 # ---------------------------------------------------------------------------
+
+
+def _jcs_serialize_value(value: object) -> str:
+    """Serialize a single JSON value per RFC 8785 (JCS) rules."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _jcs_serialize_number(value)
+    if isinstance(value, str):
+        return _jcs_serialize_string(value)
+    if isinstance(value, list):
+        return "[" + ",".join(_jcs_serialize_value(v) for v in value) + "]"
+    if isinstance(value, dict):
+        # RFC 8785 §3.2.3: sort keys by UTF-16 code unit order
+        sorted_keys = sorted(value.keys())
+        pairs = [_jcs_serialize_string(k) + ":" + _jcs_serialize_value(value[k])
+                 for k in sorted_keys]
+        return "{" + ",".join(pairs) + "}"
+    raise TypeError(f"JCS: unsupported type {type(value)}")
+
+
+def _jcs_serialize_number(value) -> str:
+    """Serialize a number per RFC 8785 §3.2.2.3 (ES6 Number serialization).
+
+    Implements ECMAScript Number.prototype.toString() formatting:
+    - Integers and whole-number floats below 10^21 render without decimal/exponent
+    - Small decimals (10^-6 < |x| < 1) use "0.000..." form
+    - Very large/small numbers use exponential notation "Ne+X" / "Ne-X"
+    """
+    if isinstance(value, bool):
+        raise TypeError("JCS: bool is not a number")
+    if isinstance(value, int):
+        return str(value)
+    if value != value:  # NaN
+        raise ValueError("JCS: NaN is not allowed in canonical JSON")
+    if value == float("inf") or value == float("-inf"):
+        raise ValueError("JCS: Infinity is not allowed in canonical JSON")
+    if value == 0.0:
+        return "0"
+
+    sign = "-" if value < 0 else ""
+    abs_value = abs(value)
+
+    # Whole-number floats below 10^21 render as integers (ES6 rule: k ≤ n ≤ 21)
+    if abs_value.is_integer() and abs_value < 1e21:
+        return sign + str(int(abs_value))
+
+    # Get shortest decimal representation via repr
+    s = repr(abs_value)
+
+    if "e" in s or "E" in s:
+        mantissa_str, exp_str = s.lower().split("e")
+        exp_offset = int(exp_str)
+        if "." in mantissa_str:
+            int_part, frac_part = mantissa_str.split(".")
+        else:
+            int_part, frac_part = mantissa_str, ""
+        digits = int_part + frac_part
+        n = exp_offset + len(int_part)  # ES6's n (10^(n-1) ≤ |x| < 10^n)
+    else:
+        if "." in s:
+            int_part, frac_part = s.split(".")
+        else:
+            int_part, frac_part = s, ""
+        digits = int_part + frac_part
+        n = len(int_part)
+
+    digits = digits.rstrip("0")
+    k = len(digits)
+
+    # ES6 Number.prototype.toString() formatting rules
+    if k <= n <= 21:
+        return sign + digits + "0" * (n - k)
+    elif 0 < n <= 21:
+        return sign + digits[:n] + "." + digits[n:]
+    elif -6 < n <= 0:
+        return sign + "0." + "0" * (-n) + digits
+    elif k == 1:
+        return sign + digits + "e" + ("+" if n - 1 >= 0 else "") + str(n - 1)
+    else:
+        return sign + digits[0] + "." + digits[1:] + "e" + ("+" if n - 1 >= 0 else "") + str(n - 1)
+
+
+def _jcs_serialize_string(value: str) -> str:
+    """Serialize a string per RFC 8785 §3.2.2.2 (JSON string escaping).
+
+    Uses Python's json.dumps which handles required escapes (\\, \", control
+    characters) and preserves non-ASCII characters as-is (ensure_ascii=False)
+    per RFC 8785 requirements.
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
+def jcs_canonicalize(obj: object) -> bytes:
+    """Serialize *obj* to canonical JSON bytes per RFC 8785 (JCS).
+
+    Implements proper RFC 8785 canonicalization:
+    - Recursive key sorting (UTF-16 code unit order)
+    - Deterministic number formatting (ES6 Number serialization)
+    - No whitespace between tokens
+    - UTF-8 encoding of the result
+    """
+    return _jcs_serialize_value(obj).encode("utf-8")
 
 
 def _get_hasher(algo: str) -> "hashlib._Hash":
@@ -152,12 +259,75 @@ def check_zip_ordering(zf: zipfile.ZipFile) -> List[Finding]:
     return findings
 
 
+ALLOWED_COMPRESSION = {zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED}
+
+
+def check_zip_compression(zf: zipfile.ZipFile) -> List[Finding]:
+    """Spec §2.1: only DEFLATE (8) or STORE (0) compression allowed."""
+    findings: List[Finding] = []
+    for info in zf.infolist():
+        if info.compress_type not in ALLOWED_COMPRESSION:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "ZIP-003",
+                    f"Entry '{info.filename}' uses unsupported compression method "
+                    f"{info.compress_type} (only DEFLATE/STORE allowed)",
+                )
+            )
+    return findings
+
+
+# Default zip bomb limits
+MAX_DECOMPRESSED_SIZE = 10 * 1024**3  # 10 GB
+MAX_COMPRESSION_RATIO = 100           # 100:1
+
+
+def check_zip_bomb(
+    zf: zipfile.ZipFile,
+    max_size: int = MAX_DECOMPRESSED_SIZE,
+    max_ratio: int = MAX_COMPRESSION_RATIO,
+) -> List[Finding]:
+    """FR-053: zip bomb protection — check decompression ratio and total size."""
+    findings: List[Finding] = []
+    total_decompressed = 0
+
+    for info in zf.infolist():
+        total_decompressed += info.file_size
+
+        if info.compress_size > 0:
+            ratio = info.file_size / info.compress_size
+            if ratio > max_ratio:
+                findings.append(
+                    Finding(
+                        Severity.ERROR,
+                        "ZIP-004",
+                        f"Entry '{info.filename}' has compression ratio {ratio:.0f}:1 "
+                        f"(limit: {max_ratio}:1) — possible zip bomb",
+                    )
+                )
+
+    if total_decompressed > max_size:
+        size_gb = total_decompressed / 1024**3
+        limit_gb = max_size / 1024**3
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ZIP-005",
+                f"Total decompressed size {size_gb:.1f} GB exceeds limit of "
+                f"{limit_gb:.1f} GB — possible zip bomb",
+            )
+        )
+
+    return findings
+
+
 def check_manifest_fields(manifest: dict) -> List[Finding]:
     """Validate required manifest fields and value constraints."""
     findings: List[Finding] = []
 
-    # Required top-level fields
-    required = ["format_version", "created_at", "workspace_id", "hash_algo", "index_summary"]
+    # Required top-level fields (must match manifest.schema.json required array)
+    required = ["format_version", "created_at", "creator_info", "platform_info", "index_summary", "hash_algo", "shard_list"]
     for field in required:
         if field not in manifest:
             findings.append(
@@ -178,19 +348,12 @@ def check_manifest_fields(manifest: dict) -> List[Finding]:
             Finding(Severity.ERROR, "MAN-012", f"Unsupported hash_algo: '{algo}'")
         )
 
-    # shard_list presence (required in v1.0)
-    if "shard_list" not in manifest:
-        findings.append(
-            Finding(
-                Severity.WARNING,
-                "MAN-013",
-                "Missing shard_list in manifest. Required for v1.0 packs.",
+    # shard_list structure validation
+    if "shard_list" in manifest:
+        if not isinstance(manifest["shard_list"], list) or len(manifest["shard_list"]) < 1:
+            findings.append(
+                Finding(Severity.ERROR, "MAN-014", "shard_list must be a non-empty array")
             )
-        )
-    elif not isinstance(manifest["shard_list"], list) or len(manifest["shard_list"]) < 1:
-        findings.append(
-            Finding(Severity.ERROR, "MAN-014", "shard_list must be a non-empty array")
-        )
 
     # index_summary
     summary = manifest.get("index_summary")
@@ -245,9 +408,29 @@ def check_entry_path(entry: dict, shard_path: str) -> List[Finding]:
     if path.startswith("/"):
         findings.append(
             Finding(
-                Severity.WARNING,
+                Severity.ERROR,
                 "ENT-003",
                 f"Absolute path in {shard_path}: {path}",
+            )
+        )
+
+    # Windows drive letter paths (e.g., C:\Users\file.stl)
+    if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ENT-004",
+                f"Drive letter path in {shard_path}: {path}",
+            )
+        )
+
+    # UNC paths (e.g., \\server\share\file.stl)
+    if path.startswith("\\\\"):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "ENT-005",
+                f"UNC path in {shard_path}: {path}",
             )
         )
 
@@ -271,8 +454,9 @@ def check_hash_format(hash_value: str, shard_path: str, entry_path: str) -> List
 def verify_entries_hash(
     entries: List[dict], algo: str, expected_hash: str
 ) -> Tuple[bool, str]:
-    """Compute entries_hash using canonical JSON (sorted keys, no whitespace)."""
-    encoded = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """Compute entries_hash using canonical JSON (RFC 8785 JCS)."""
+    sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
+    encoded = jcs_canonicalize(sorted_entries)
     digest = compute_digest([encoded], algo)
     actual = f"{algo}:{digest}"
     return actual == expected_hash, actual
@@ -489,9 +673,93 @@ def verify_sidecar(
                 Severity.INFO,
                 "SDC-011",
                 f"Sidecar contains {len(signatures)} signature(s). "
-                "Signature verification requires external key material (not checked here).",
+                "Use --verify-signatures to check them.",
             )
         )
+
+    return findings
+
+
+def verify_signature_entries(
+    signatures: List[dict], pack_hash: str
+) -> List[Finding]:
+    """Verify cryptographic signatures over pack_hash (REQ-L3-030)."""
+    findings: List[Finding] = []
+
+    try:
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+        from cryptography.hazmat.primitives.hashes import SHA256
+        from cryptography.hazmat.primitives.serialization import load_der_public_key
+    except ImportError:
+        findings.append(
+            Finding(
+                Severity.WARNING,
+                "SIG-001",
+                "Signature verification requires the 'cryptography' package: "
+                "pip install cryptography",
+            )
+        )
+        return findings
+
+    # The signed data is the pack_hash string encoded as UTF-8
+    signed_data = pack_hash.encode("utf-8")
+
+    for i, sig_entry in enumerate(signatures):
+        alg = sig_entry.get("alg", "")
+        pub_key_b64 = sig_entry.get("public_key", "")
+        sig_b64 = sig_entry.get("signature", "")
+        signer = sig_entry.get("signer_id", f"signature[{i}]")
+
+        if not alg or not pub_key_b64 or not sig_b64:
+            findings.append(
+                Finding(Severity.ERROR, "SIG-002",
+                        f"{signer}: missing required field (alg/public_key/signature)")
+            )
+            continue
+
+        try:
+            pub_key_bytes = base64.b64decode(pub_key_b64)
+            sig_bytes = base64.b64decode(sig_b64)
+        except Exception as exc:
+            findings.append(
+                Finding(Severity.ERROR, "SIG-003",
+                        f"{signer}: invalid base64 encoding — {exc}")
+            )
+            continue
+
+        if alg == "ed25519":
+            try:
+                key = Ed25519PublicKey.from_public_bytes(pub_key_bytes)
+                key.verify(sig_bytes, signed_data)
+                findings.append(
+                    Finding(Severity.INFO, "SIG-010",
+                            f"{signer}: Ed25519 signature verified successfully")
+                )
+            except Exception as exc:
+                findings.append(
+                    Finding(Severity.ERROR, "SIG-004",
+                            f"{signer}: Ed25519 signature verification failed — {exc}")
+                )
+        elif alg == "rsa-pss-sha256":
+            try:
+                key = load_der_public_key(pub_key_bytes)
+                key.verify(sig_bytes, signed_data, PSS(mgf=MGF1(SHA256()), salt_length=PSS.MAX_LENGTH), SHA256())
+                findings.append(
+                    Finding(Severity.INFO, "SIG-010",
+                            f"{signer}: RSA-PSS-SHA256 signature verified successfully")
+                )
+            except Exception as exc:
+                findings.append(
+                    Finding(Severity.ERROR, "SIG-004",
+                            f"{signer}: RSA-PSS-SHA256 signature verification failed — {exc}")
+                )
+        else:
+            findings.append(
+                Finding(Severity.INFO, "SIG-005",
+                        f"{signer}: unsupported algorithm '{alg}' — skipped")
+            )
 
     return findings
 
@@ -501,7 +769,13 @@ def verify_sidecar(
 # ---------------------------------------------------------------------------
 
 
-def validate(meshpack_path: str, sidecar_path: Optional[str] = None) -> List[Finding]:
+def validate(
+    meshpack_path: str,
+    sidecar_path: Optional[str] = None,
+    max_size: int = MAX_DECOMPRESSED_SIZE,
+    max_ratio: int = MAX_COMPRESSION_RATIO,
+    verify_sigs: bool = False,
+) -> List[Finding]:
     """Run all validation checks on a .meshpack archive."""
     findings: List[Finding] = []
 
@@ -515,6 +789,12 @@ def validate(meshpack_path: str, sidecar_path: Optional[str] = None) -> List[Fin
     with zf:
         # ZIP ordering
         findings.extend(check_zip_ordering(zf))
+
+        # ZIP compression methods
+        findings.extend(check_zip_compression(zf))
+
+        # Zip bomb protection
+        findings.extend(check_zip_bomb(zf, max_size, max_ratio))
 
         # Manifest
         manifest, man_findings = load_manifest(zf)
@@ -530,6 +810,19 @@ def validate(meshpack_path: str, sidecar_path: Optional[str] = None) -> List[Fin
 
     # Sidecar verification (outside ZIP context — reads file from disk)
     findings.extend(verify_sidecar(meshpack_path, sidecar_path, manifest))
+
+    # Signature verification (when requested)
+    if verify_sigs:
+        # Collect signatures from manifest and sidecar
+        all_signatures = manifest.get("signatures", []) if manifest else []
+        pack_hash = manifest.get("pack_hash", "") if manifest else ""
+        if all_signatures and pack_hash:
+            findings.extend(verify_signature_entries(all_signatures, pack_hash))
+        elif all_signatures and not pack_hash:
+            findings.append(
+                Finding(Severity.WARNING, "SIG-006",
+                        "Signatures present but no pack_hash to verify against")
+            )
 
     return findings
 
@@ -560,9 +853,29 @@ def main() -> int:
         dest="json_output",
         help="Output findings as JSON array",
     )
+    parser.add_argument(
+        "--max-size",
+        type=int,
+        default=MAX_DECOMPRESSED_SIZE,
+        help=f"Max total decompressed size in bytes (default: {MAX_DECOMPRESSED_SIZE})",
+    )
+    parser.add_argument(
+        "--max-ratio",
+        type=int,
+        default=MAX_COMPRESSION_RATIO,
+        help=f"Max compression ratio per entry (default: {MAX_COMPRESSION_RATIO}:1)",
+    )
+    parser.add_argument(
+        "--verify-signatures",
+        action="store_true",
+        help="Verify cryptographic signatures (requires 'cryptography' package)",
+    )
     args = parser.parse_args()
 
-    findings = validate(args.meshpack, args.sidecar)
+    findings = validate(
+        args.meshpack, args.sidecar, args.max_size, args.max_ratio,
+        verify_sigs=args.verify_signatures,
+    )
 
     # Output
     if args.json_output:

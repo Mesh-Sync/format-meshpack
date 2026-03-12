@@ -22,6 +22,33 @@ def load_schema(filename):
     with open(os.path.join(SCHEMA_DIR, filename), "r") as f:
         return json.load(f)
 
+
+# Pre-load common definitions for cross-file $ref resolution
+_common_schema = load_schema("common.schema.json")
+_common_definitions = _common_schema.get("definitions", {})
+
+
+def resolve_ref(ref):
+    """Resolve a $ref URI to the referenced schema fragment.
+    Supports local (#/definitions/X) and cross-file (common.schema.json#/definitions/X) refs."""
+    if "#" in ref:
+        file_part, fragment = ref.split("#", 1)
+    else:
+        return None
+
+    parts = [p for p in fragment.split("/") if p]
+
+    if file_part == "" or file_part is None:
+        return None  # local ref — handled by caller via definitions dict
+
+    if file_part == "common.schema.json":
+        node = _common_schema
+        for part in parts:
+            node = node.get(part, {})
+        return node if node else None
+
+    return None
+
 # Simple implementation to deduce type from schema property
 
 
@@ -35,9 +62,29 @@ def snake_to_pascal(name: str) -> str:
 
 
 def get_type_info(prop, prop_name, definitions=None):
+    # Handle allOf with $ref (e.g., {"allOf": [{"$ref": "common.schema.json#/..."}], "description": "..."})
+    all_of = prop.get("allOf")
+    if all_of:
+        for sub in all_of:
+            ref = sub.get("$ref")
+            if ref:
+                resolved = resolve_ref(ref)
+                if resolved:
+                    return get_type_info(resolved, prop_name, definitions)
+                # Local ref fallback
+                if ref.startswith("#/definitions/"):
+                    def_name = ref.split("/")[-1]
+                    return {"base": snake_to_pascal(def_name), "is_ref": True}
+        # If no $ref found in allOf, try merging (simplified)
+        return {"base": "unknown", "is_primitive": True}
+
     ref = prop.get("$ref")
     if ref:
-        # e.g., "#/definitions/fileEntry" -> "FileEntry"
+        # Cross-file ref (e.g., "common.schema.json#/definitions/signatureEntry")
+        resolved = resolve_ref(ref)
+        if resolved:
+            return get_type_info(resolved, prop_name, definitions)
+        # Local ref: e.g., "#/definitions/fileEntry" -> "FileEntry"
         def_name = ref.split("/")[-1]
         return {"base": snake_to_pascal(def_name), "is_ref": True}
 
@@ -61,6 +108,9 @@ def get_type_info(prop, prop_name, definitions=None):
 
     if t == "integer":
         return {"base": "integer", "is_primitive": True}
+
+    if t == "number":
+        return {"base": "number", "is_primitive": True}
 
     if t == "boolean":
         return {"base": "boolean", "is_primitive": True}

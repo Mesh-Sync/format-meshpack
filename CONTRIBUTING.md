@@ -86,6 +86,11 @@ Edit JSON Schema files in `schema/`:
 - `shard.schema.json` - Index shard and file entry definitions
 - `sidecar.schema.json` - Detached integrity sidecar
 - `common.schema.json` - Shared type definitions (canonical reference)
+- `extensions/meshsync_geometry.schema.json` - Geometry analysis metadata
+- `extensions/meshsync_printability.schema.json` - Print analysis metadata
+- `extensions/meshsync_dependencies.schema.json` - Material/texture references
+- `extensions/meshsync_content.schema.json` - Content metadata (title, tags)
+- `extensions/meshsync_thumbnails.schema.json` - Thumbnail/preview references
 
 After editing, validate:
 ```bash
@@ -260,6 +265,56 @@ chore(ci): add automated SDK compilation test
 - Include code examples
 - Markdown files should wrap at 100 characters
 - Use relative links for cross-references
+
+## Release Process
+
+### Required Secrets
+
+The following GitHub repository secrets must be configured before publishing:
+
+| Secret              | Purpose                              | Where to get it                          |
+|---------------------|--------------------------------------|------------------------------------------|
+| `NPM_TOKEN`        | Publish TypeScript SDK to npm        | [npmjs.com → Access Tokens](https://www.npmjs.com/settings/~/tokens) |
+| `PYPI_API_TOKEN`   | Publish Python SDK to PyPI           | [pypi.org → API tokens](https://pypi.org/manage/account/token/) |
+| `CRATES_IO_TOKEN`  | Publish Rust SDK to crates.io        | [crates.io → API Tokens](https://crates.io/settings/tokens) |
+
+### Version Bumping
+
+Version numbers live in each SDK's package metadata. After schema or template changes,
+bump versions in these files:
+
+1. **Python** — `generators/templates/python/setup.cfg.j2` → `version =`
+2. **TypeScript** — `generators/templates/typescript/package.json.j2` → `"version":`
+3. **Rust** — `generators/templates/rust/Cargo.toml.j2` → `version =`
+
+All three must match the intended release tag (e.g. `1.1.0`).
+
+### Publishing a Release
+
+1. Ensure all CI checks pass on the latest commit.
+2. Bump versions in the template files listed above.
+3. Regenerate SDKs: `just generate`
+4. Commit the version bump: `git commit -am "chore: bump version to X.Y.Z"`
+5. Create and push a signed tag:
+   ```bash
+   git tag -s vX.Y.Z -m "Release vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+6. The CI `publish` job triggers automatically on `v*` tags and will:
+   - Generate + compile all SDKs
+   - Publish to PyPI, npm, and crates.io
+   - Verify each package is accessible on its registry
+
+### Local Dry-Run
+
+Before pushing a release tag, you can verify the publish pipeline locally:
+
+```bash
+just publish-dry-run
+```
+
+This runs the full generate → validate → lint → test → compile → pack cycle
+without uploading anything.
 
 ## Questions?
 

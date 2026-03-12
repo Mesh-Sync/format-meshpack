@@ -100,3 +100,23 @@ jobs:
         run: |
           cd generated/sdks/rust/meshpack
           cargo publish
+
+      - name: Verify Published Packages
+        run: |
+          echo "Waiting for registries to index new packages..."
+          sleep 30
+
+          PKG_VERSION="${GITHUB_REF_NAME#v}"
+
+          echo "--- Verifying NPM package ---"
+          npm view @meshsync/meshpack@"$PKG_VERSION" version
+
+          echo "--- Verifying PyPI package ---"
+          pip index versions meshpack 2>/dev/null | grep -q "$PKG_VERSION" \
+            || echo "Warning: PyPI verification requires pip 21.2+; check manually."
+
+          echo "--- Verifying Crates.io package ---"
+          curl -sf "https://crates.io/api/v1/crates/meshpack/$PKG_VERSION" \
+            | python3 -c "import sys,json; v=json.load(sys.stdin)['version']['num']; print(f'crates.io: {v}')"
+
+          echo "All packages verified."

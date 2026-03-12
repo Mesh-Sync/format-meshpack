@@ -413,7 +413,7 @@ Implementations MAY include `import_policy` to guide receivers:
 ```json
 {
   "import_policy": {
-    "id_conflict": "fail",         // "fail" | "skip" | "replace"
+    "id_conflict": "fail",         // "fail" | "skip" | "overwrite"
     "metamodel_merge": "strict",   // "strict" | "merge" | "replace"
     "strip_creator_info": false
   }

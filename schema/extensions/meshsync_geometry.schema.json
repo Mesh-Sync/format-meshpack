@@ -58,7 +58,8 @@
           "type": "number",
           "description": "Volume in mm³ (negative if inverted normals)"
         }
-      }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true
