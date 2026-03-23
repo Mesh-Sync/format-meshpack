@@ -361,7 +361,7 @@ def check_manifest_fields(manifest: dict) -> List[Finding]:
         for sf in ("total_files", "total_shards", "total_size_bytes"):
             if sf not in summary:
                 findings.append(
-                    Finding(Severity.WARNING, "MAN-015", f"index_summary missing field: {sf}")
+                    Finding(Severity.ERROR, "MAN-015", f"index_summary missing required field: {sf}")
                 )
 
     return findings
