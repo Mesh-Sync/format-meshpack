@@ -166,12 +166,14 @@ class TestEntrySorting:
         entries = [
             {
                 "path": "z_file.stl",
+                "original_name": "z_file.stl",
                 "size_bytes": 10,
                 "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 "modified_at": "2026-01-01T00:00:00+00:00",
             },
             {
                 "path": "a_file.stl",
+                "original_name": "a_file.stl",
                 "size_bytes": 20,
                 "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 "modified_at": "2026-01-01T00:00:00+00:00",
@@ -305,12 +307,14 @@ class TestEntriesHashRFC8785:
         """verify_entries_hash must sort entries by path before hashing."""
         entry_a = {
             "path": "a.txt",
+            "original_name": "a.txt",
             "size_bytes": 10,
             "hash": "sha256:" + "aa" * 32,
             "modified_at": "2026-01-01T00:00:00+00:00",
         }
         entry_z = {
             "path": "z.txt",
+            "original_name": "z.txt",
             "size_bytes": 20,
             "hash": "sha256:" + "bb" * 32,
             "modified_at": "2026-01-01T00:00:00+00:00",
@@ -329,12 +333,14 @@ class TestEntriesHashRFC8785:
         entries = [
             {
                 "path": "models/a.stl",
+                "original_name": "a.stl",
                 "size_bytes": 100,
                 "hash": "sha256:" + "aa" * 32,
                 "modified_at": "2026-01-01T00:00:00+00:00",
             },
             {
                 "path": "models/b.stl",
+                "original_name": "b.stl",
                 "size_bytes": 200,
                 "hash": "sha256:" + "bb" * 32,
                 "modified_at": "2026-01-01T00:00:00+00:00",
@@ -362,6 +368,7 @@ class TestResourceRefFormat:
         """resource_ref with colon (algo prefix) should produce a warning."""
         entry = {
             "path": "models/test.stl",
+            "original_name": "test.stl",
             "size_bytes": 100,
             "hash": "sha256:aabbccdd" + "00" * 28,
             "modified_at": "2026-01-01T00:00:00+00:00",
