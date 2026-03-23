@@ -59,7 +59,9 @@ Physically, a `.meshpack` file is a **ZIP archive** with a custom extension.
 - Alternative: `.mpack`
 
 ### 2.5 Media Type
-- Recommended MIME type: `application/vnd.meshsync.meshpack+zip`
+- MIME type: `application/vnd.meshsync.meshpack+zip`
+- Structured syntax suffix: `+zip` per [RFC 6839](https://www.rfc-editor.org/rfc/rfc6839)
+- IANA registration template: [`definition/iana-media-type-registration.md`](iana-media-type-registration.md)
 - Implementations SHOULD register this type with the operating system for file association.
 
 ### 2.6 Future Consideration: PTAR Format

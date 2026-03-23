@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **IANA Media Type Registration**: `definition/iana-media-type-registration.md` — RFC 6838 registration template for `application/vnd.meshsync.meshpack+zip` (#21)
+
+### Changed
+- **Spec §2.5**: Reference IANA registration template and RFC 6839 structured syntax suffix
+
 ## [1.1.0] - 2026-03-06
 
 ### Added
