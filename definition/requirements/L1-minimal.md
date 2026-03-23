@@ -52,7 +52,7 @@ Implementations MUST validate the presence of the following required fields in `
 | `created_at` | string | ISO 8601 datetime |
 | `creator_info` | object | At minimum `{ "name": string }` |
 | `platform_info` | object | Contains `os`, `path_separator`, `is_case_sensitive` |
-| `index_summary` | object | Contains `total_files`, `total_shards` |
+| `index_summary` | object | Contains `total_files`, `total_shards`, `total_size_bytes` |
 | `hash_algo` | string | One of: `sha256`, `sha512`, `blake3` |
 | `shard_list` | array | Non-empty array of shard references |
 
