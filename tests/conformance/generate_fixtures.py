@@ -132,6 +132,7 @@ def generate_path_traversal() -> bytes:
     b = MeshPackBuilder()
     entry = {
         "path": "../etc/passwd",
+        "original_name": "passwd",
         "size_bytes": 0,
         "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "modified_at": "2026-01-01T00:00:00+00:00",
@@ -145,12 +146,14 @@ def generate_bad_shard_order() -> bytes:
     entries = [
         {
             "path": "models/zebra.stl",
+            "original_name": "zebra.stl",
             "size_bytes": 100,
             "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "modified_at": "2026-01-01T00:00:00+00:00",
         },
         {
             "path": "models/alpha.stl",
+            "original_name": "alpha.stl",
             "size_bytes": 200,
             "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "modified_at": "2026-01-01T00:00:00+00:00",

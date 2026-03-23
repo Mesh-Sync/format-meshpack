@@ -32,6 +32,7 @@ class TestDeltaOperations:
         entries = [
             {
                 "path": "models/new.stl",
+                "original_name": "new.stl",
                 "size_bytes": 100,
                 "hash": "sha256:" + "aa" * 32,
                 "modified_at": "2026-01-01T00:00:00+00:00",
@@ -39,6 +40,7 @@ class TestDeltaOperations:
             },
             {
                 "path": "models/old.stl",
+                "original_name": "old.stl",
                 "size_bytes": 0,
                 "hash": "sha256:" + "bb" * 32,
                 "modified_at": "2026-01-01T00:00:00+00:00",

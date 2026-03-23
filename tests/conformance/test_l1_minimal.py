@@ -142,6 +142,7 @@ class TestPathLength:
         """Path exceeding 1024 chars must produce an error."""
         long_entry = {
             "path": "a" * 1025,
+            "original_name": "a",
             "size_bytes": 0,
             "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "modified_at": "2026-01-01T00:00:00+00:00",
@@ -165,6 +166,7 @@ class TestPathTraversal:
         """Paths with '..' must produce an error."""
         bad_entry = {
             "path": "../etc/passwd",
+            "original_name": "passwd",
             "size_bytes": 0,
             "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "modified_at": "2026-01-01T00:00:00+00:00",
@@ -197,6 +199,7 @@ class TestPathSecurityNegative:
         """Absolute, drive letter, and UNC paths must be rejected."""
         entry = {
             "path": bad_path,
+            "original_name": "file.stl",
             "size_bytes": 0,
             "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "modified_at": "2026-01-01T00:00:00+00:00",
