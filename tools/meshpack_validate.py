@@ -48,6 +48,8 @@ HASH_PATTERN = re.compile(
     r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
 )
 SUPPORTED_ALGOS = {"sha256", "sha512", "blake3"}
+SUPPORTED_FORMAT_MAJOR = 2
+SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_DIR = os.path.join(REPO_DIR, "schema")
 EXTENSIONS_DIR = os.path.join(SCHEMA_DIR, "extensions")
@@ -67,6 +69,10 @@ def _zero_hash(algo: str) -> str:
     if algo == "sha512":
         return f"{algo}:{'0' * 128}"
     return f"{algo}:{'0' * 64}"
+
+
+def _path_sort_key(path: object) -> bytes:
+    return str(path).encode("utf-8")
 
 
 def _load_schema(filename: str) -> dict:
@@ -392,6 +398,59 @@ def check_zip_ordering(zf: zipfile.ZipFile) -> List[Finding]:
     return findings
 
 
+def check_readme_layout(zf: zipfile.ZipFile) -> List[Finding]:
+    """Validate mandatory human-readable README entries for public L2 archives."""
+    findings: List[Finding] = []
+    names = set(zf.namelist())
+
+    if "_README.md" not in names:
+        findings.append(
+            Finding(
+                Severity.WARNING,
+                "LAY-001",
+                "Root _README.md is missing; L2 writers must include a human-readable root description.",
+            )
+        )
+
+    has_index_shards = any(name.startswith("index/part-") and name.endswith(".json") for name in names)
+    if has_index_shards and "index/_README.md" not in names:
+        findings.append(
+            Finding(
+                Severity.WARNING,
+                "LAY-002",
+                "index/_README.md is missing; L2 writers must document the sharded index directory.",
+            )
+        )
+
+    has_resources = any(name.startswith("resources/") and name != "resources/_README.md" for name in names)
+    if has_resources and "resources/_README.md" not in names:
+        findings.append(
+            Finding(
+                Severity.WARNING,
+                "LAY-003",
+                "resources/_README.md is missing while embedded resources are present.",
+            )
+        )
+
+    for readme_path in ("_README.md", "index/_README.md", "resources/_README.md"):
+        if readme_path not in names:
+            continue
+        try:
+            data = zf.read(readme_path)
+        except KeyError:
+            continue
+        if b"\r" in data:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "LAY-004",
+                    f"{readme_path} must use LF line endings, not CRLF/CR.",
+                )
+            )
+
+    return findings
+
+
 ALLOWED_COMPRESSION = {zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED}
 
 
@@ -467,12 +526,23 @@ def check_manifest_fields(manifest: dict) -> List[Finding]:
                 Finding(Severity.ERROR, "MAN-010", f"Missing required field: {field}")
             )
 
-    # format_version semver check
+    # format_version semver and compatibility checks
     fv = manifest.get("format_version", "")
-    if fv and not re.match(r"^\d+\.\d+\.\d+$", fv):
+    version_match = SEMVER_PATTERN.match(fv) if isinstance(fv, str) else None
+    if fv and not version_match:
         findings.append(
             Finding(Severity.WARNING, "MAN-011", f"format_version '{fv}' is not valid semver")
         )
+    elif version_match:
+        major = int(version_match.group(1))
+        if major > SUPPORTED_FORMAT_MAJOR:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "MAN-013",
+                    f"Unsupported format_version {fv}; maximum supported major version is {SUPPORTED_FORMAT_MAJOR}.x.x",
+                )
+            )
 
     # hash_algo
     algo = manifest.get("hash_algo", "")
@@ -696,7 +766,7 @@ def verify_entries_hash(
     entries: List[dict], algo: str, expected_hash: str
 ) -> Tuple[bool, str]:
     """Compute entries_hash using canonical JSON (RFC 8785 JCS)."""
-    sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
+    sorted_entries = sorted(entries, key=lambda e: _path_sort_key(e.get("path", "")))
     encoded = jcs_canonicalize(sorted_entries)
     digest = compute_digest([encoded], algo)
     actual = f"{algo}:{digest}"
@@ -789,11 +859,11 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
             if isinstance(entry, dict) and isinstance(entry.get("size_bytes"), int)
         )
 
-        # Check entry ordering (lexicographic by path)
+        # Check entry ordering (UTF-8 byte order by path)
         paths = [e.get("path", "") for e in entries]
-        if paths != sorted(paths):
+        if paths != sorted(paths, key=_path_sort_key):
             findings.append(
-                Finding(Severity.WARNING, "SHD-004", f"Entries not sorted by path in {shard_path}")
+                Finding(Severity.WARNING, "SHD-004", f"Entries not sorted by UTF-8 path order in {shard_path}")
             )
 
         # Validate entries_count
@@ -1209,6 +1279,9 @@ def validate(
     with zf:
         # ZIP ordering
         findings.extend(check_zip_ordering(zf))
+
+        # Human-readable layout entries
+        findings.extend(check_readme_layout(zf))
 
         # ZIP compression methods
         findings.extend(check_zip_compression(zf))

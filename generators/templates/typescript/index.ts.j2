@@ -3,7 +3,9 @@ import { blake3 } from '@noble/hashes/blake3';
 import JSZip from 'jszip';
 
 export const VERSION = "{{ version }}";
+const SUPPORTED_FORMAT_MAJOR = Number.parseInt(VERSION.split(".")[0] ?? "2", 10);
 const RESOURCE_REF_PATTERN = /^([a-f0-9]{64}|[a-f0-9]{128})\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
 
 {% macro ts_base(t) -%}
 {%- if t.is_array -%}
@@ -71,6 +73,7 @@ export interface WriteMeshPackInput {
   manifest: Manifest;
   shards: Shard[];
   resources?: Record<string, Uint8Array | ArrayBuffer | string>;
+  extraFiles?: Record<string, Uint8Array | ArrayBuffer | string> | Map<string, Uint8Array | ArrayBuffer | string>;
 }
 
 export class MeshPackReader {
@@ -185,15 +188,37 @@ export async function writeMeshPack(input: WriteMeshPackInput): Promise<Uint8Arr
   const zip = new JSZip();
   zip.file("manifest.json", `${JSON.stringify(input.manifest, null, 2)}\n`);
 
+  const extraFiles = normalizeFileMap(input.extraFiles);
+  if (!extraFiles.has("_README.md")) {
+    zip.file("_README.md", defaultRootReadme(input.manifest));
+  }
+  if (!extraFiles.has("index/_README.md")) {
+    zip.file("index/_README.md", defaultIndexReadme(input.shards));
+  }
+
   for (const shard of input.shards) {
     zip.file(`index/${shard.shard_id}.json`, `${JSON.stringify(shard, null, 2)}\n`);
   }
 
-  for (const [name, content] of Object.entries(input.resources ?? {})) {
+  const resources = Object.entries(input.resources ?? {}).sort((left, right) => compareUtf8Path(left[0], right[0]));
+  if (resources.length > 0 && !extraFiles.has("resources/_README.md")) {
+    zip.file("resources/_README.md", defaultResourcesReadme(resources.map(([name]) => name)));
+  }
+  for (const [name, content] of resources) {
     if (!isSafeResourceRef(name)) {
       throw new Error(`Unsafe or non-canonical resource name: ${name}`);
     }
     zip.file(`resources/${name}`, content);
+  }
+
+  for (const [path, content] of [...extraFiles.entries()].sort((left, right) => compareUtf8Path(left[0], right[0]))) {
+    if (!isSafeArchivePath(path)) {
+      throw new Error(`Unsafe extra file path: ${path}`);
+    }
+    if (path === "manifest.json" || /^index\/part-\d{5}\.json$/.test(path) || path.startsWith("resources/") && path !== "resources/_README.md") {
+      throw new Error(`extraFiles cannot override reserved MeshPack entry: ${path}`);
+    }
+    zip.file(path, content);
   }
 
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
@@ -211,14 +236,20 @@ export async function validateMeshPack(
     if (names.length > 0 && names[0] !== "manifest.json") {
       findings.push(finding("WARNING", "ZIP-001", `manifest.json should be the first ZIP entry (found '${names[0]}' first)`));
     }
+    findings.push(...await validateReadmeLayout(zip, namesSet));
 
     const document = await readMeshPack(data);
     const manifest = document.manifest;
+    findings.push(...validateFormatVersion(manifest.format_version));
     if (document.entries.length !== document.manifest.index_summary.total_files) {
       findings.push(finding("WARNING", "MAN-015", "manifest index_summary.total_files does not match loaded entry count"));
     }
     if (document.shards.length !== document.manifest.index_summary.total_shards) {
       findings.push(finding("WARNING", "MAN-015", "manifest index_summary.total_shards does not match loaded shard count"));
+    }
+    const totalSizeBytes = document.entries.reduce((sum, entry) => sum + (typeof entry.size_bytes === "number" ? entry.size_bytes : 0), 0);
+    if (totalSizeBytes !== document.manifest.index_summary.total_size_bytes) {
+      findings.push(finding("ERROR", "MAN-022", `manifest index_summary.total_size_bytes mismatch: manifest=${document.manifest.index_summary.total_size_bytes} actual=${totalSizeBytes}`));
     }
     if (!Array.isArray(manifest.shard_list) || manifest.shard_list.length === 0) {
       findings.push(finding("ERROR", "MAN-014", "shard_list must be a non-empty array"));
@@ -242,8 +273,8 @@ export async function validateMeshPack(
         continue;
       }
       const paths = shard.entries.map((entry) => entry.path);
-      if (JSON.stringify(paths) !== JSON.stringify([...paths].sort())) {
-        findings.push(finding("WARNING", "SHD-004", `Entries not sorted by path in ${shardPath}`));
+      if (JSON.stringify(paths) !== JSON.stringify([...paths].sort(compareUtf8Path))) {
+        findings.push(finding("WARNING", "SHD-004", `Entries not sorted by UTF-8 path order in ${shardPath}`));
       }
       if (shardRef.entries_count !== shard.entries.length) {
         findings.push(finding("ERROR", "SHD-005", `entries_count mismatch in ${shardPath}: expected ${shardRef.entries_count}, got ${shard.entries.length}`));
@@ -286,6 +317,42 @@ export async function validateMeshPack(
 
 function finding(severity: MeshPackValidationFinding["severity"], code: string, message: string): MeshPackValidationFinding {
   return { severity, code, message };
+}
+
+function validateFormatVersion(formatVersion: string): MeshPackValidationFinding[] {
+  const match = SEMVER_PATTERN.exec(formatVersion);
+  if (!match) {
+    return [finding("WARNING", "MAN-011", `format_version '${formatVersion}' is not valid semver`)];
+  }
+  const major = Number.parseInt(match[1], 10);
+  if (major > SUPPORTED_FORMAT_MAJOR) {
+    return [finding("ERROR", "MAN-013", `Unsupported format_version ${formatVersion}; maximum supported major version is ${SUPPORTED_FORMAT_MAJOR}.x.x`)];
+  }
+  return [];
+}
+
+async function validateReadmeLayout(zip: JSZip, namesSet: Set<string>): Promise<MeshPackValidationFinding[]> {
+  const findings: MeshPackValidationFinding[] = [];
+  if (!namesSet.has("_README.md")) {
+    findings.push(finding("WARNING", "LAY-001", "Root _README.md is missing; L2 writers must include a human-readable root description."));
+  }
+  if ([...namesSet].some((name) => /^index\/part-\d+\.json$/.test(name)) && !namesSet.has("index/_README.md")) {
+    findings.push(finding("WARNING", "LAY-002", "index/_README.md is missing; L2 writers must document the sharded index directory."));
+  }
+  if ([...namesSet].some((name) => name.startsWith("resources/") && name !== "resources/_README.md") && !namesSet.has("resources/_README.md")) {
+    findings.push(finding("WARNING", "LAY-003", "resources/_README.md is missing while embedded resources are present."));
+  }
+  for (const readmePath of ["_README.md", "index/_README.md", "resources/_README.md"]) {
+    const file = zip.file(readmePath);
+    if (!file) {
+      continue;
+    }
+    const data = await file.async("uint8array");
+    if (data.includes(13)) {
+      findings.push(finding("ERROR", "LAY-004", `${readmePath} must use LF line endings, not CRLF/CR.`));
+    }
+  }
+  return findings;
 }
 
 function validateSidecar(
@@ -476,9 +543,42 @@ export function listModelEntries(entries: FileEntry[]): FileEntry[] {
 }
 
 export function computeEntriesHash(entries: FileEntry[], hashAlgo: HashAlgorithm = "sha256"): string {
-  const sortedEntries = [...entries].sort((a, b) => a.path.localeCompare(b.path));
+  const sortedEntries = [...entries].sort((a, b) => compareUtf8Path(a.path, b.path));
   const digest = computeDigest(Buffer.from(canonicalStringify(sortedEntries), "utf8"), hashAlgo);
   return `${hashAlgo}:${digest}`;
+}
+
+function compareUtf8Path(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function normalizeFileMap(files: WriteMeshPackInput["extraFiles"]): Map<string, Uint8Array | ArrayBuffer | string> {
+  if (!files) {
+    return new Map();
+  }
+  return files instanceof Map ? new Map(files) : new Map(Object.entries(files));
+}
+
+function isSafeArchivePath(path: string): boolean {
+  return path.length > 0
+    && path.length <= 1024
+    && !path.startsWith("/")
+    && !path.startsWith("\\\\")
+    && !/^[A-Za-z]:/.test(path)
+    && !/(^|\/)\.\.(\/|$)/.test(path)
+    && !path.includes("\\");
+}
+
+function defaultRootReadme(manifest: Manifest): string {
+  return `# MeshPack Archive\n\nFormat version: ${manifest.format_version}\nCreated at: ${manifest.created_at}\n`;
+}
+
+function defaultIndexReadme(shards: Shard[]): string {
+  return `# MeshPack Index\n\nContains ${shards.length} shard file(s).\n`;
+}
+
+function defaultResourcesReadme(resourceNames: string[]): string {
+  return `# MeshPack Resources\n\nContains ${resourceNames.length} content-addressed resource file(s).\n`;
 }
 
 export function canonicalStringify(value: unknown): string {

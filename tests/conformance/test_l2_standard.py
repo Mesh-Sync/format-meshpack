@@ -205,6 +205,64 @@ class TestEntrySorting:
         finally:
             os.unlink(path)
 
+    def test_utf8_byte_order_for_non_ascii_paths(self, pack_builder: MeshPackBuilder) -> None:
+        """Path sorting is defined by UTF-8 byte order, not locale collation."""
+        ascii_entry = {
+            "path": "models/z.stl",
+            "original_name": "z.stl",
+            "size_bytes": 10,
+            "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        unicode_entry = {
+            "path": "models/é.stl",
+            "original_name": "é.stl",
+            "size_bytes": 20,
+            "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+        path = pack_builder.add_shard("part-00001", [ascii_entry, unicode_entry], entries_count=2).build_to_file()
+        try:
+            findings = validate(path)
+            warnings = [f for f in findings if f.severity == Severity.WARNING]
+            assert not [f for f in warnings if f.code == "SHD-004"], warnings
+        finally:
+            os.unlink(path)
+
+
+@pytest.mark.REQ_L1_030
+class TestReadmeLayout:
+    def test_missing_root_and_index_readmes_warned(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        try:
+            findings = validate(path)
+            warnings = {f.code for f in findings if f.severity == Severity.WARNING}
+            assert "LAY-001" in warnings
+            assert "LAY-002" in warnings
+        finally:
+            os.unlink(path)
+
+    def test_missing_resource_readme_warned_when_resources_present(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).add_resource("a" * 64 + ".png", b"abc").build_to_file()
+        try:
+            findings = validate(path)
+            warnings = {f.code for f in findings if f.severity == Severity.WARNING}
+            assert "LAY-003" in warnings
+        finally:
+            os.unlink(path)
+
+    def test_readme_crlf_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).add_extra_file(
+            "_README.md",
+            b"MeshPack archive\r\n",
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = {f.code for f in findings if f.severity == Severity.ERROR}
+            assert "LAY-004" in errors
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
 # REQ-L2-002: generated shard_list entries_count MUST match actual entry count

@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generators'))
 
 from generate_sdks import (
+    audit_generator_inputs,
     clean_generated_sdks,
     get_type_info,
     snake_to_pascal,
@@ -276,6 +277,22 @@ class TestGenerationReleaseReadiness:
         with pytest.raises(ValueError):
             load_version(str(version_file))
 
+    def test_generator_schema_audit_accepts_current_schemas(self):
+        audit_generator_inputs()
+
+    def test_generator_schema_audit_rejects_broken_refs(self, tmp_path):
+        schema_dir = tmp_path / "schema"
+        extensions_dir = schema_dir / "extensions"
+        schema_dir.mkdir()
+        extensions_dir.mkdir()
+        (schema_dir / "broken.schema.json").write_text(
+            json.dumps({"$schema": "http://json-schema.org/draft-07/schema#", "$ref": "missing.schema.json#/definitions/item"}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="Generator schema audit failed"):
+            audit_generator_inputs(str(schema_dir), str(extensions_dir))
+
     def test_clean_generated_sdks_removes_stale_files(self, tmp_path):
         output_dir = tmp_path / "generated" / "sdks"
         stale_file = output_dir / "typescript" / "stale.js"
@@ -296,6 +313,34 @@ class TestGenerationReleaseReadiness:
             contents = template.read()
 
         assert '"rootDir": "./src"' in contents
+
+    @pytest.mark.parametrize(
+        "template_path",
+        [
+            ("python", "README.md.j2"),
+            ("rust", "Cargo.toml.j2"),
+            ("rust", "README.md.j2"),
+            ("typescript", "package.json.j2"),
+            ("typescript", "README.md.j2"),
+            ("java", "pom.xml.j2"),
+            ("java", "README.md.j2"),
+        ],
+    )
+    def test_package_metadata_is_templated(self, template_path):
+        path = os.path.join(REPO_ROOT, "generators", "templates", *template_path)
+        assert os.path.exists(path)
+
+    def test_generator_no_longer_embeds_package_metadata(self):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "generate_sdks.py"),
+            "r",
+            encoding="utf-8",
+        ) as generator:
+            contents = generator.read()
+
+        assert 'name = "meshpack"' not in contents
+        assert '"name": "@mesh-sync/meshpack"' not in contents
+        assert "<artifactId>meshpack</artifactId>" not in contents
 
     def test_java_template_maps_wire_enums_and_ignores_unknown_fields(self):
         with open(

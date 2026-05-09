@@ -41,7 +41,9 @@ import org.bouncycastle.crypto.digests.Blake3Digest;
 
 public final class MeshPack {
   public static final String VERSION = "{{ version }}";
+  private static final int SUPPORTED_FORMAT_MAJOR = {{ format_major }};
   private static final String RESOURCE_REF_PATTERN = "^([a-f0-9]{64}|[a-f0-9]{128})\\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$";
+  private static final String SEMVER_PATTERN = "^\\d+\\.\\d+\\.\\d+$";
   private static final ObjectMapper MAPPER = new ObjectMapper()
       .registerModule(new JavaTimeModule())
       .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -140,6 +142,7 @@ Object
       if (!entries.isEmpty() && !"manifest.json".equals(entries.get(0).getName())) {
         findings.add(finding("WARNING", "ZIP-001", "manifest.json should be the first ZIP entry (found '" + entries.get(0).getName() + "' first)"));
       }
+      validateReadmeLayout(archive, names, findings);
 
       long totalDecompressed = 0;
       for (ZipEntry entry : entries) {
@@ -167,6 +170,8 @@ Object
         findings.add(finding("ERROR", "MAN-002", "Failed to parse manifest.json: " + exception.getMessage()));
         return new ValidationResult(findings);
       }
+
+      validateFormatVersion(manifest.format_version(), findings);
 
       if (!List.of("sha256", "sha512", "blake3").contains(manifest.hash_algo())) {
         findings.add(finding("ERROR", "MAN-012", "Unsupported hash_algo: '" + manifest.hash_algo() + "'"));
@@ -199,9 +204,9 @@ Object
 
         List<FileEntry> shardEntries = shard.entries() == null ? List.of() : shard.entries();
         List<String> paths = shardEntries.stream().map(FileEntry::path).toList();
-        List<String> sortedPaths = paths.stream().sorted().toList();
+        List<String> sortedPaths = paths.stream().sorted(MeshPack::compareUtf8).toList();
         if (!paths.equals(sortedPaths)) {
-          findings.add(finding("WARNING", "SHD-004", "Entries not sorted by path in " + shardPath));
+          findings.add(finding("WARNING", "SHD-004", "Entries not sorted by UTF-8 path order in " + shardPath));
         }
         if (!Long.valueOf(shardEntries.size()).equals(shardRef.entries_count())) {
           findings.add(finding("ERROR", "SHD-005", "entries_count mismatch in " + shardPath + ": expected " + shardRef.entries_count() + ", got " + shardEntries.size()));
@@ -243,6 +248,42 @@ Object
 
   private static ValidationFinding finding(String severity, String code, String message) {
     return new ValidationFinding(severity, code, message);
+  }
+
+  private static void validateFormatVersion(String formatVersion, List<ValidationFinding> findings) {
+    if (formatVersion == null || !formatVersion.matches(SEMVER_PATTERN)) {
+      findings.add(finding("WARNING", "MAN-011", "format_version '" + formatVersion + "' is not valid semver"));
+      return;
+    }
+    int major = Integer.parseInt(formatVersion.substring(0, formatVersion.indexOf('.')));
+    if (major > SUPPORTED_FORMAT_MAJOR) {
+      findings.add(finding("ERROR", "MAN-013", "Unsupported format_version " + formatVersion + "; maximum supported major version is " + SUPPORTED_FORMAT_MAJOR + ".x.x"));
+    }
+  }
+
+  private static void validateReadmeLayout(ZipFile archive, Set<String> names, List<ValidationFinding> findings) throws IOException {
+    if (!names.contains("_README.md")) {
+      findings.add(finding("WARNING", "LAY-001", "Root _README.md is missing; L2 writers must include a human-readable root description."));
+    }
+    if (names.stream().anyMatch(name -> name.startsWith("index/part-") && name.endsWith(".json")) && !names.contains("index/_README.md")) {
+      findings.add(finding("WARNING", "LAY-002", "index/_README.md is missing; L2 writers must document the sharded index directory."));
+    }
+    if (names.stream().anyMatch(name -> name.startsWith("resources/") && !"resources/_README.md".equals(name)) && !names.contains("resources/_README.md")) {
+      findings.add(finding("WARNING", "LAY-003", "resources/_README.md is missing while embedded resources are present."));
+    }
+    for (String readmePath : List.of("_README.md", "index/_README.md", "resources/_README.md")) {
+      ZipEntry entry = archive.getEntry(readmePath);
+      if (entry == null) {
+        continue;
+      }
+      byte[] data = readBytes(archive, entry);
+      for (byte item : data) {
+        if (item == '\r') {
+          findings.add(finding("ERROR", "LAY-004", readmePath + " must use LF line endings, not CRLF/CR."));
+          break;
+        }
+      }
+    }
   }
 
   private static void validateEntryPath(String path, String shardPath, List<ValidationFinding> findings) {
@@ -418,7 +459,7 @@ Object
       JsonNode entries = MAPPER.readTree(shardJson).get("entries");
       List<JsonNode> sortedEntries = new ArrayList<>();
       entries.forEach(sortedEntries::add);
-      sortedEntries.sort(Comparator.comparing(node -> node.path("path").asText("")));
+      sortedEntries.sort(Comparator.comparing(node -> node.path("path").asText(""), MeshPack::compareUtf8));
       String canonical = canonicalJson(MAPPER.valueToTree(sortedEntries));
       byte[] digest = digest(canonical.getBytes(StandardCharsets.UTF_8), algo);
       return algo + ":" + HexFormat.of().formatHex(digest);
@@ -480,6 +521,19 @@ Object
       }
     }
     return "{" + String.join(",", pairs) + "}";
+  }
+
+  private static int compareUtf8(String left, String right) {
+    byte[] leftBytes = left.getBytes(StandardCharsets.UTF_8);
+    byte[] rightBytes = right.getBytes(StandardCharsets.UTF_8);
+    int length = Math.min(leftBytes.length, rightBytes.length);
+    for (int index = 0; index < length; index++) {
+      int comparison = Byte.compareUnsigned(leftBytes[index], rightBytes[index]);
+      if (comparison != 0) {
+        return comparison;
+      }
+    }
+    return Integer.compare(leftBytes.length, rightBytes.length);
   }
 
   public static final class Reader implements AutoCloseable {
@@ -553,10 +607,7 @@ Object
     }
 
     private byte[] readBytes(ZipEntry entry) throws IOException {
-      try (InputStream input = archive.getInputStream(entry); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-        input.transferTo(output);
-        return output.toByteArray();
-      }
+      return MeshPack.readBytes(archive, entry);
     }
 
     @Override
@@ -570,9 +621,13 @@ Object
     if (entry == null) {
       throw new IOException(entryName + " not found in archive");
     }
+    return new String(readBytes(archive, entry), StandardCharsets.UTF_8);
+  }
+
+  private static byte[] readBytes(ZipFile archive, ZipEntry entry) throws IOException {
     try (InputStream input = archive.getInputStream(entry); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
       input.transferTo(output);
-      return output.toString(StandardCharsets.UTF_8);
+      return output.toByteArray();
     }
   }
 

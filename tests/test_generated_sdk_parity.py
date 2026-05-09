@@ -71,3 +71,19 @@ def test_generated_python_validator_matches_reference_on_unsafe_resource_ref() -
 
     assert "RES-004" in _codes(reference_findings, "ERROR")
     assert "RES-004" in _codes(sdk_result.findings, "ERROR")
+
+
+def test_generated_python_validator_matches_reference_on_future_major() -> None:
+    sdk = _import_python_sdk()
+    pack_builder = MeshPackBuilder()
+    pack_builder.set_manifest_field("format_version", "3.0.0")
+    pack = pack_builder.add_shard("part-00001", []).build_to_file()
+
+    try:
+        reference_findings = validate(pack)
+        sdk_result = sdk.validate_meshpack(pack)
+    finally:
+        os.unlink(pack)
+
+    assert "MAN-013" in _codes(reference_findings, "ERROR")
+    assert "MAN-013" in _codes(sdk_result.findings, "ERROR")

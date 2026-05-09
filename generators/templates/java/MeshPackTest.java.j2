@@ -154,10 +154,32 @@ class MeshPackTest {
     }
   }
 
+  @Test
+  void validatorReportsFutureMajorFormatVersion() throws Exception {
+    Path archive = Files.createTempFile("meshpack-java-sdk-future-major", ".mpack");
+    try {
+      try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+        writeEntry(zip, "manifest.json", manifestWithVersion("3.0.0", 0, EMPTY_ENTRIES_HASH));
+        writeEntry(zip, "index/part-00001.json", shard("[]", EMPTY_ENTRIES_HASH));
+      }
+
+      MeshPack.ValidationResult result = MeshPack.validate(archive);
+
+      assertFalse(result.valid());
+      assertTrue(result.errors().stream().anyMatch(finding -> "MAN-013".equals(finding.code())));
+    } finally {
+      Files.deleteIfExists(archive);
+    }
+  }
+
   private static String manifest(int entriesCount, String entriesHash) {
+    return manifestWithVersion("{{ version }}", entriesCount, entriesHash);
+  }
+
+  private static String manifestWithVersion(String formatVersion, int entriesCount, String entriesHash) {
     return """
         {
-          "format_version": "{{ version }}",
+          "format_version": "%s",
           "created_at": "2026-05-09T00:00:00Z",
           "creator_info": { "name": "Java SDK parity test" },
           "platform_info": { "os": "linux", "path_separator": "/", "is_case_sensitive": true },
@@ -165,7 +187,7 @@ class MeshPackTest {
           "hash_algo": "sha256",
           "shard_list": [{ "id": "part-00001", "entries_count": %d, "entries_hash": "%s" }]
         }
-        """.formatted(entriesCount, entriesCount, entriesHash);
+        """.formatted(formatVersion, entriesCount, entriesCount, entriesHash);
   }
 
   private static String shard(String entries, String entriesHash) {

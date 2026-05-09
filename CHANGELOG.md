@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+- Public-readiness validation for future-major `format_version` rejection (`MAN-013`) and README layout diagnostics (`LAY-001` through `LAY-004`).
+- SDK metadata templates for Python, Rust, TypeScript, and Java 17 package outputs.
+
+### Changed
+- Entry ordering and `entries_hash` canonicalization now explicitly use UTF-8 byte path ordering across the reference validator and generated SDK templates.
+- The generated TypeScript writer accepts deterministic `extraFiles` and emits default README entries for L2 archive layout compatibility.
 
 ## [2.0.0] - 2026-05-09
 

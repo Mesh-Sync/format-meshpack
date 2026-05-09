@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 
-import { OSType, validateMeshPack, writeMeshPack, type FileEntry, type Manifest, type Shard } from "./index";
+import { OSType, canonicalStringify, computeEntriesHash, validateMeshPack, writeMeshPack, type FileEntry, type Manifest, type Shard } from "./index";
 
 const EMPTY_ENTRIES_HASH = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
 
-function manifest(entriesCount = 0, entriesHash = EMPTY_ENTRIES_HASH): Manifest {
+function manifest(entriesCount = 0, entriesHash = EMPTY_ENTRIES_HASH, formatVersion = "{{ version }}"): Manifest {
   return {
-    format_version: "{{ version }}",
+    format_version: formatVersion,
     created_at: "2026-05-09T00:00:00Z",
     creator_info: { name: "TypeScript SDK parity test" },
     platform_info: { os: OSType.Linux, path_separator: "/", is_case_sensitive: true },
@@ -82,4 +82,47 @@ test("validator reports RES-004 for unsafe resource_ref values", async () => {
 
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((finding) => finding.code === "RES-004"));
+});
+
+test("validator reports MAN-013 for future-major archives", async () => {
+  const archive = await writeMeshPack({ manifest: manifest(0, EMPTY_ENTRIES_HASH, "3.0.0"), shards: [shard()] });
+
+  const result = await validateMeshPack(archive);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((finding) => finding.code === "MAN-013"));
+});
+
+test("writer emits required readmes and accepts deterministic extraFiles", async () => {
+  const archive = await writeMeshPack({
+    manifest: manifest(),
+    shards: [shard()],
+    extraFiles: new Map([["docs/notice.txt", "hello\n"]]),
+  });
+  const zip = await JSZip.loadAsync(archive);
+
+  assert.ok(zip.file("_README.md"));
+  assert.ok(zip.file("index/_README.md"));
+  assert.ok(zip.file("docs/notice.txt"));
+});
+
+test("entries_hash uses UTF-8 byte ordering for non-ASCII paths", () => {
+  const asciiEntry: FileEntry = {
+    path: "models/z.stl",
+    original_name: "z.stl",
+    size_bytes: 10,
+    hash: "sha256:" + "aa".repeat(32),
+    modified_at: "2026-05-09T00:00:00Z",
+  };
+  const unicodeEntry: FileEntry = {
+    path: "models/é.stl",
+    original_name: "é.stl",
+    size_bytes: 20,
+    hash: "sha256:" + "bb".repeat(32),
+    modified_at: "2026-05-09T00:00:00Z",
+  };
+  const canonical = canonicalStringify([asciiEntry, unicodeEntry]);
+  const expected = `sha256:${createHash("sha256").update(Buffer.from(canonical, "utf8")).digest("hex")}`;
+
+  assert.equal(computeEntriesHash([unicodeEntry, asciiEntry]), expected);
 });

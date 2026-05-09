@@ -65,10 +65,72 @@ def load_version(version_file: str = VERSION_FILE) -> str:
     return version
 
 
+def _schema_pointer_get(schema: Dict[str, Any], pointer: str) -> Any:
+    current: Any = schema
+    for raw_part in pointer.lstrip("/").split("/") if pointer else []:
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or part not in current:
+            raise KeyError(pointer)
+        current = current[part]
+    return current
+
+
+def _walk_schema_nodes(node: Any) -> Iterable[Dict[str, Any]]:
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _walk_schema_nodes(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_schema_nodes(item)
+
+
+def audit_generator_inputs(schema_dir: str = SCHEMA_DIR, extensions_dir: str = EXTENSIONS_DIR) -> None:
+    schemas: Dict[str, Dict[str, Any]] = {}
+
+    for filename in sorted(os.listdir(schema_dir)):
+        if filename.endswith(".schema.json"):
+            schemas[filename] = (
+                load_schema(filename)
+                if schema_dir == SCHEMA_DIR
+                else _load_schema_at(os.path.join(schema_dir, filename))
+            )
+
+    if os.path.exists(extensions_dir):
+        for filename in sorted(os.listdir(extensions_dir)):
+            if filename.endswith(".schema.json"):
+                schemas[filename] = _load_schema_at(os.path.join(extensions_dir, filename))
+
+    errors: List[str] = []
+    for source_name, schema in schemas.items():
+        for node in _walk_schema_nodes(schema):
+            ref = node.get("$ref")
+            if not isinstance(ref, str):
+                continue
+            file_part, _, fragment = ref.partition("#")
+            target_name = file_part or source_name
+            target_schema = schemas.get(target_name)
+            if target_schema is None:
+                errors.append(f"{source_name}: unresolved schema file in $ref {ref!r}")
+                continue
+            try:
+                _schema_pointer_get(target_schema, fragment)
+            except KeyError:
+                errors.append(f"{source_name}: unresolved pointer in $ref {ref!r}")
+
+    if errors:
+        raise ValueError("Generator schema audit failed:\n" + "\n".join(f"- {error}" for error in errors))
+
+
 def clean_generated_sdks(output_dir: str = OUTPUT_DIR) -> None:
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
+
+
+def _load_schema_at(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as schema_file:
+        return json.load(schema_file)
 
 
 _common_schema = load_schema("common.schema.json")
@@ -445,6 +507,7 @@ def _write_text(path: str, text: str) -> None:
 
 def main() -> None:
     version = load_version()
+    audit_generator_inputs()
     clean_generated_sdks()
 
     schemas = [
@@ -462,6 +525,7 @@ def main() -> None:
 
     context = {
         "version": version,
+        "format_major": int(version.split(".", 1)[0]),
         "models": all_models,
         "extensions": extensions,
         "java_package": "net.meshsync.meshpack",
@@ -486,9 +550,10 @@ def main() -> None:
         os.path.join(OUTPUT_DIR, "python", "meshpack", "__init__.py"),
         "from .models import *\nfrom .extensions import *\n",
     )
-    _write_text(
+    render_template(
+        "python/README.md.j2",
+        context,
         os.path.join(OUTPUT_DIR, "python", "README.md"),
-        "# MeshPack Python SDK\n\nAuto-generated SDK.\n",
     )
 
     render_template(
@@ -496,26 +561,16 @@ def main() -> None:
         context,
         os.path.join(OUTPUT_DIR, "rust", "meshpack", "src", "lib.rs"),
     )
-    _write_text(os.path.join(OUTPUT_DIR, "rust", "meshpack", "Cargo.toml"), f"""[package]
-name = "meshpack"
-version = "{version}"
-edition = "2021"
-license = "MIT"
-description = "Standard MeshPack SDK"
-homepage = "https://github.com/Mesh-Sync/standard-meshpack"
-repository = "https://github.com/Mesh-Sync/standard-meshpack"
-
-[dependencies]
-serde = {{ version = "1.0", features = ["derive"] }}
-serde_json = "1.0"
-sha2 = "0.10"
-blake3 = "1.5"
-base64 = "0.22"
-ed25519-dalek = "2.1"
-chrono = {{ version = "0.4", features = ["serde"] }}
-zip = "0.6"
-typed-builder = "0.18"
-""")
+    render_template(
+        "rust/Cargo.toml.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "rust", "meshpack", "Cargo.toml"),
+    )
+    render_template(
+        "rust/README.md.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "rust", "meshpack", "README.md"),
+    )
 
     render_template(
         "typescript/index.ts.j2",
@@ -532,21 +587,16 @@ typed-builder = "0.18"
         context,
         os.path.join(OUTPUT_DIR, "typescript", "tsconfig.json"),
     )
-    _write_json(os.path.join(OUTPUT_DIR, "typescript", "package.json"), {
-        "name": "@mesh-sync/meshpack",
-        "version": version,
-        "license": "MIT",
-        "main": "dist/index.js",
-        "types": "dist/index.d.ts",
-        "files": ["dist/index.js", "dist/index.d.ts", "src/index.ts", "README.md"],
-        "scripts": {
-            "build": "tsc",
-            "lint": "tsc --noEmit",
-            "test": "npm run build && node --test dist/index.test.js"
-        },
-        "dependencies": {"@noble/hashes": "^1.7.1", "jszip": "^3.10.1"},
-        "devDependencies": {"@types/node": "^20.0.0", "typescript": "^5.0.0"},
-    })
+    render_template(
+        "typescript/package.json.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "typescript", "package.json"),
+    )
+    render_template(
+        "typescript/README.md.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "typescript", "README.md"),
+    )
 
     render_template(
         "java/MeshPack.java.j2",
@@ -580,73 +630,15 @@ typed-builder = "0.18"
             "MeshPackTest.java",
         ),
     )
-    pom_header = (
-        '<project xmlns="http://maven.apache.org/POM/4.0.0" '
-        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
-        'xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 '
-        'https://maven.apache.org/xsd/maven-4.0.0.xsd">'
+    render_template(
+        "java/pom.xml.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "java", "meshpack", "pom.xml"),
     )
-    _write_text(os.path.join(OUTPUT_DIR, "java", "meshpack", "pom.xml"), f"""{pom_header}
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>net.meshsync</groupId>
-  <artifactId>meshpack</artifactId>
-    <version>{version}</version>
-  <name>MeshPack Java SDK</name>
-  <description>Standard MeshPack SDK for Java 17+</description>
-  <licenses>
-    <license>
-      <name>MIT License</name>
-    </license>
-  </licenses>
-  <properties>
-    <maven.compiler.release>17</maven.compiler.release>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-  </properties>
-    <dependencies>
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>2.17.2</version>
-        </dependency>
-        <dependency>
-            <groupId>com.fasterxml.jackson.datatype</groupId>
-            <artifactId>jackson-datatype-jsr310</artifactId>
-            <version>2.17.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.79</version>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <version>5.10.3</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
-                <configuration>
-                    <release>17</release>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.2.5</version>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-""")
-    _write_text(
+    render_template(
+        "java/README.md.j2",
+        context,
         os.path.join(OUTPUT_DIR, "java", "meshpack", "README.md"),
-        "# MeshPack Java SDK\n\nAuto-generated Java 17+ SDK.\n",
     )
 
 

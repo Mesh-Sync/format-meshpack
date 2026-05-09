@@ -87,6 +87,17 @@ class TestFormatVersion:
         import re
         assert re.match(r"^\d+\.\d+\.\d+$", manifest["format_version"])
 
+    def test_future_major_version_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """A 2.x validator must reject future-major MeshPack archives."""
+        pack_builder.set_manifest_field("format_version", "3.0.0")
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "MAN-013" for f in errors)
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
 # REQ-L1-003 / REQ-L2-013: hash_algo MUST be present and supported

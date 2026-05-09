@@ -19,6 +19,8 @@ RESOURCE_REF_PATTERN = re.compile(r"^([a-f0-9]{64}|[a-f0-9]{128})\.[A-Za-z0-9][A
 ALLOWED_COMPRESSION = {zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED}
 MAX_DECOMPRESSED_SIZE = 10 * 1024**3
 MAX_COMPRESSION_RATIO = 100
+SUPPORTED_FORMAT_MAJOR = int("{{ version }}".split(".")[0])
+SEMVER_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 
 {% macro py_type(t) -%}
@@ -97,8 +99,68 @@ def _finding(severity: str, code: str, message: str) -> ValidationFinding:
     return ValidationFinding(severity=severity, code=code, message=message)
 
 
+def _path_sort_key(path: Any) -> bytes:
+    return str(path).encode("utf-8")
+
+
 def _canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return _canonical_number(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, list):
+        return "[" + ",".join(_canonical_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ",".join(
+            json.dumps(str(key), ensure_ascii=False) + ":" + _canonical_json(value[key])
+            for key in sorted(value.keys())
+        ) + "}"
+    raise TypeError(f"Unsupported JSON value for canonicalization: {type(value)!r}")
+
+
+def _canonical_number(value: float) -> str:
+    if value != value:
+        raise ValueError("JCS: NaN is not allowed in canonical JSON")
+    if value == float("inf") or value == float("-inf"):
+        raise ValueError("JCS: Infinity is not allowed in canonical JSON")
+    if value == 0.0:
+        return "0"
+
+    sign = "-" if value < 0 else ""
+    abs_value = abs(value)
+    if abs_value.is_integer() and abs_value < 1e21:
+        return sign + str(int(abs_value))
+
+    text = repr(abs_value)
+    if "e" in text or "E" in text:
+        mantissa, exponent = text.lower().split("e")
+        exp_offset = int(exponent)
+        int_part, _, frac_part = mantissa.partition(".")
+        digits = int_part + frac_part
+        n = exp_offset + len(int_part)
+    else:
+        int_part, _, frac_part = text.partition(".")
+        digits = int_part + frac_part
+        n = len(int_part)
+
+    digits = digits.rstrip("0")
+    k = len(digits)
+    if k <= n <= 21:
+        return sign + digits + "0" * (n - k)
+    if 0 < n <= 21:
+        return sign + digits[:n] + "." + digits[n:]
+    if -6 < n <= 0:
+        return sign + "0." + "0" * (-n) + digits
+    exponent = n - 1
+    if k == 1:
+        return sign + digits + "e" + ("+" if exponent >= 0 else "") + str(exponent)
+    return sign + digits[0] + "." + digits[1:] + "e" + ("+" if exponent >= 0 else "") + str(exponent)
 
 
 def _compute_digest(data: bytes, algo: str) -> str:
@@ -116,9 +178,35 @@ def _compute_digest(data: bytes, algo: str) -> str:
 
 
 def _compute_entries_hash(entries: List[Dict[str, Any]], algo: str) -> str:
-    sorted_entries = sorted(entries, key=lambda entry: entry.get("path", ""))
+    sorted_entries = sorted(entries, key=lambda entry: _path_sort_key(entry.get("path", "")))
     digest = _compute_digest(_canonical_json(sorted_entries).encode("utf-8"), algo)
     return f"{algo}:{digest}"
+
+
+def _check_format_version(format_version: Any, findings: List[ValidationFinding]) -> None:
+    if not isinstance(format_version, str):
+        return
+    match = SEMVER_PATTERN.match(format_version)
+    if not match:
+        findings.append(_finding("WARNING", "MAN-011", f"format_version '{format_version}' is not valid semver"))
+        return
+    major = int(match.group(1))
+    if major > SUPPORTED_FORMAT_MAJOR:
+        findings.append(_finding("ERROR", "MAN-013", f"Unsupported format_version {format_version}; maximum supported major version is {SUPPORTED_FORMAT_MAJOR}.x.x"))
+
+
+def _check_readme_layout(archive: zipfile.ZipFile, names_set: set[str], findings: List[ValidationFinding]) -> None:
+    if "_README.md" not in names_set:
+        findings.append(_finding("WARNING", "LAY-001", "Root _README.md is missing; L2 writers must include a human-readable root description."))
+    if any(name.startswith("index/part-") and name.endswith(".json") for name in names_set) and "index/_README.md" not in names_set:
+        findings.append(_finding("WARNING", "LAY-002", "index/_README.md is missing; L2 writers must document the sharded index directory."))
+    if any(name.startswith("resources/") and name != "resources/_README.md" for name in names_set) and "resources/_README.md" not in names_set:
+        findings.append(_finding("WARNING", "LAY-003", "resources/_README.md is missing while embedded resources are present."))
+    for readme_path in ("_README.md", "index/_README.md", "resources/_README.md"):
+        if readme_path not in names_set:
+            continue
+        if b"\r" in archive.read(readme_path):
+            findings.append(_finding("ERROR", "LAY-004", f"{readme_path} must use LF line endings, not CRLF/CR."))
 
 
 def _check_entry_path(path: str, shard_path: str, findings: List[ValidationFinding]) -> None:
@@ -290,6 +378,7 @@ def validate_meshpack(
         names_set = set(names)
         if names and names[0] != "manifest.json":
             findings.append(_finding("WARNING", "ZIP-001", f"manifest.json should be the first ZIP entry (found '{names[0]}' first)"))
+        _check_readme_layout(archive, names_set, findings)
 
         total_decompressed = 0
         for info in archive.infolist():
@@ -316,8 +405,7 @@ def validate_meshpack(
         for field_name in required:
             if field_name not in manifest:
                 findings.append(_finding("ERROR", "MAN-010", f"Missing required field: {field_name}"))
-        if manifest.get("format_version") and not re.match(r"^\d+\.\d+\.\d+$", manifest["format_version"]):
-            findings.append(_finding("WARNING", "MAN-011", f"format_version '{manifest['format_version']}' is not valid semver"))
+        _check_format_version(manifest.get("format_version"), findings)
 
         algo = manifest.get("hash_algo", "sha256")
         if algo not in {"sha256", "sha512", "blake3"}:
@@ -350,8 +438,8 @@ def validate_meshpack(
 
             entries = shard.get("entries", [])
             paths = [entry.get("path", "") for entry in entries]
-            if paths != sorted(paths):
-                findings.append(_finding("WARNING", "SHD-004", f"Entries not sorted by path in {shard_path}"))
+            if paths != sorted(paths, key=_path_sort_key):
+                findings.append(_finding("WARNING", "SHD-004", f"Entries not sorted by UTF-8 path order in {shard_path}"))
             expected_count = shard_meta.get("entries_count", shard.get("entries_count"))
             if expected_count is not None and expected_count != len(entries):
                 findings.append(_finding("ERROR", "SHD-005", f"entries_count mismatch in {shard_path}: expected {expected_count}, got {len(entries)}"))
@@ -381,7 +469,7 @@ def validate_meshpack(
                 if preview_ref and f"resources/{preview_ref}" not in names_set:
                     findings.append(_finding("ERROR", "RES-002", f"Missing embedded resource: resources/{preview_ref}"))
 
-            _check_sidecar(file_path, manifest, findings, sidecar_path, verify_signatures)
+        _check_sidecar(file_path, manifest, findings, sidecar_path, verify_signatures)
 
     return ValidationResult(findings=findings)
 

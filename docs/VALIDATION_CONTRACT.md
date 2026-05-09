@@ -23,7 +23,8 @@ All generated SDK validators must implement these public-readiness checks:
 |------|-------|
 | Archive open/read errors | `ARC-001` |
 | Manifest presence and parse errors | `MAN-001`, `MAN-002` |
-| Manifest required fields and hash algorithm | `MAN-010`, `MAN-011`, `MAN-012`, `MAN-014`, `MAN-015` |
+| Manifest required fields, version compatibility, and hash algorithm | `MAN-010`, `MAN-011`, `MAN-012`, `MAN-013`, `MAN-014`, `MAN-015`, `MAN-022` |
+| Human-readable layout metadata | `LAY-001`, `LAY-002`, `LAY-003`, `LAY-004` |
 | ZIP ordering, compression, and bomb limits | `ZIP-001`, `ZIP-003`, `ZIP-004`, `ZIP-005` |
 | Shard presence, parse, order, count, hash | `SHD-001`, `SHD-002`, `SHD-003`, `SHD-004`, `SHD-005`, `SHD-006`, `SHD-007` |
 | Entry path and hash safety | `ENT-001`, `ENT-002`, `ENT-003`, `ENT-004`, `ENT-005`, `HSH-001` |
@@ -48,6 +49,18 @@ The reference validator supports two schema modes:
 | `strict` | All schema failures, including unknown properties, are errors. Use this for release gates and public fixtures. |
 
 The CLI flag is `--schema-mode compat|strict`. The separate `--strict` flag still means warnings are treated as process-failing findings.
+
+## Format Version Compatibility
+
+Validators for MeshPack 2.x must reject future-major archives before treating the manifest as compatible. A `format_version` that is not SemVer produces `MAN-011`; a SemVer value with a major version greater than the validator's supported major version produces `MAN-013` as an error.
+
+Minor and patch versions within the supported major line remain forward-compatible unless another validation rule fails.
+
+## README Layout
+
+Public L2 archives are expected to include human-readable README entries at `/_README.md`, `/index/_README.md`, and `/resources/_README.md` when embedded resources are present. Missing README entries emit `LAY-001` through `LAY-003` warnings. README files must use LF line endings; CRLF or CR emits `LAY-004` as an error.
+
+Path ordering and `entries_hash` canonicalization are defined by UTF-8 byte order, not locale collation.
 
 ## Resource References
 

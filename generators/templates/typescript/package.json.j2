@@ -1,0 +1,26 @@
+{
+  "name": "@mesh-sync/meshpack",
+  "version": "{{ version }}",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "src/index.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "test": "npm run build && node --test dist/index.test.js"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.7.1",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
