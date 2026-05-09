@@ -60,3 +60,9 @@ try (MeshPack.Reader reader = new MeshPack.Reader(Path.of("sample.meshpack"))) {
   System.out.println(document.manifest().format_version());
 }
 ```
+
+## Notes
+
+SDK readers treat `resource_ref` and `preview_ref` as canonical resource filenames only. Unsafe values with paths, traversal, drive letters, backslashes, colons, or non-hash names are rejected before lookup.
+
+Use the Python reference validator for release gates that require JSON Schema `strict` mode, detached sidecar verification, or signature verification.

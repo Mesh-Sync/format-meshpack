@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/sidecar.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/sidecar.schema.json",
   "title": "MeshPack Integrity Sidecar",
   "description": "Detached integrity verification file for MeshPack archives (*.meshpack.integrity). Required because pack_hash cannot be computed and stored inside the archive itself. This is the AUTHORITATIVE source for pack_hash and signatures.",
   "type": "object",
@@ -22,18 +22,12 @@
     },
     "pack_hash": {
       "allOf": [{ "$ref": "common.schema.json#/definitions/hashValue" }],
-      "description": "The AUTHORITATIVE hash of the .meshpack archive bytes (excluding items listed in 'exclusions'). Verifiers MUST use this value, not manifest.pack_hash."
+      "description": "The AUTHORITATIVE hash of the complete .meshpack archive bytes. Verifiers MUST use this value, not manifest.pack_hash."
     },
     "computed_at": {
       "type": "string",
       "format": "date-time",
       "description": "When this sidecar was generated (ISO 8601 UTC)"
-    },
-    "exclusions": {
-      "type": "array",
-      "description": "List of ZIP entry paths excluded from hash computation (e.g., mapping.db which is non-deterministic)",
-      "items": { "type": "string" },
-      "default": ["mapping.db"]
     },
     "signatures": {
       "type": "array",

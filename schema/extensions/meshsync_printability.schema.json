@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_printability.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_printability.schema.json",
   "title": "MeshSync Printability Extension",
   "description": "3D printing analysis results, technology-agnostic with technology-specific sub-objects",
   "type": "object",
@@ -104,8 +104,9 @@
             "min_feature_size_mm": { "type": "number", "minimum": 0 }
           }
         }
-      }
+      },
+      "additionalProperties": false
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

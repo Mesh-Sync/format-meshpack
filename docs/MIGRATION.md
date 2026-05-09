@@ -1,8 +1,8 @@
 # Migration Guide
 
-## Migrating from pre-1.1 generated SDKs
+## Migrating from pre-2.0 generated SDKs
 
-MeshPack `1.1.0` makes Python, Rust, TypeScript, and Java 17 first-class generated SDK targets.
+MeshPack `2.0.0` keeps Python, Rust, TypeScript, and Java 17 as first-class generated SDK targets and tightens the public schema contract.
 
 Important changes for SDK consumers:
 
@@ -11,6 +11,8 @@ Important changes for SDK consumers:
 3. SDKs expose validator result types using the shared `severity`/`code`/`message` finding shape.
 4. Java records ignore unknown JSON fields and deserialize wire enum values such as `"linux"` correctly.
 5. TypeScript is Node-first for validation because hashing uses Node crypto APIs.
+6. `resource_ref`, `preview_ref`, and `meshsync_thumbnails.v2` values are flat resource filenames (`{lowercase_hex_hash}.{extension}`), not prefixed hashes such as `sha256:...`.
+7. `meshsync_dependencies.v2` values are safe POSIX-relative FileEntry paths. Absolute paths, drive letters, traversal segments, and backslashes are invalid.
 
 The Python reference validator remains the authority for detached sidecar and signature verification.
 
@@ -80,7 +82,6 @@ For each entry in your shard that uses the `_deleted` extension:
 | `add`     | New file added to the workspace          |
 | `modify`  | Existing file modified                   |
 | `delete`  | File removed from the workspace          |
-| `rename`  | File renamed (use with `previous_path`)  |
 
 ### Deprecation Timeline
 
@@ -88,7 +89,7 @@ For each entry in your shard that uses the `_deleted` extension:
 |---------|--------|
 | < 1.0   | `_deleted` extension used for deletions |
 | 1.0     | `operation` field introduced; `_deleted` deprecated |
-| 2.0     | `_deleted` extension support will be **removed** |
+| 2.0     | Writers MUST NOT emit `_deleted`; migration readers may still accept it for old archives |
 
 Validators MAY emit a deprecation warning (DEP-001) when `_deleted` is
 encountered in v1.x archives.

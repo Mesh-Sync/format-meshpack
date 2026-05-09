@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/manifest.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/manifest.schema.json",
   "title": "MeshPack Manifest",
   "description": "Root metadata for MeshPack archive. See common.schema.json for shared definitions.",
   "type": "object",

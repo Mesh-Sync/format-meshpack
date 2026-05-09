@@ -281,14 +281,7 @@ The following GitHub repository secrets must be configured before publishing:
 
 ### Version Bumping
 
-Version numbers live in each SDK's package metadata. After schema or template changes,
-bump versions in these files:
-
-1. **Python** — `generators/templates/python/setup.cfg.j2` → `version =`
-2. **TypeScript** — `generators/templates/typescript/package.json.j2` → `"version":`
-3. **Rust** — `generators/templates/rust/Cargo.toml.j2` → `version =`
-
-All three must match the intended release tag (e.g. `1.1.0`).
+Version numbers live in the repository `VERSION` file and are injected into generated SDK package metadata. After schema or template changes, update `VERSION`, run `just generate`, and verify with `just check-version`.
 
 ### Publishing a Release
 

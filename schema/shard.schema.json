@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/shard.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/shard.schema.json",
   "title": "MeshPack Index Shard",
   "description": "Sharded file index containing a subset of file entries. See common.schema.json for shared definitions.",
   "type": "object",
@@ -49,9 +49,8 @@
       "required": ["path", "original_name", "size_bytes", "hash", "modified_at"],
       "properties": {
         "path": {
-          "type": "string",
+          "allOf": [{ "$ref": "common.schema.json#/definitions/safeRelativePath" }],
           "description": "Relative path from root, POSIX separators only (/). MUST NOT contain '..', absolute paths, or drive letters.",
-          "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]:)[^\\\\]+$",
           "maxLength": 1024
         },
         "ids": {
@@ -107,7 +106,8 @@
         },
         "resource_ref": {
           "type": ["string", "null"],
-          "description": "If not null, references a file in resources/ named as {hex_hash}.{ext} (no algo prefix — algo is implicit from manifest.hash_algo). Colons are avoided for Windows compatibility."
+          "pattern": "^([a-f0-9]{64}|[a-f0-9]{128})\\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$",
+          "description": "If not null, references a flat file in resources/ named as {hex_hash}.{ext}. Algorithm prefixes, path separators, drive letters, UNC prefixes, and traversal segments are invalid."
         },
         "resource_hash": {
           "allOf": [{ "$ref": "common.schema.json#/definitions/hashValue" }],
@@ -181,8 +181,9 @@
           }
         },
         "preview_ref": {
-          "type": "string",
-          "description": "Reference to preview thumbnail in resources/ (format: {hex_hash}.{ext})"
+          "type": ["string", "null"],
+          "pattern": "^([a-f0-9]{64}|[a-f0-9]{128})\\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$",
+          "description": "Reference to preview thumbnail in resources/ (format: {hex_hash}.{ext}; filename only, no algorithm prefix or path separators)"
         },
         "operation": {
           "allOf": [{ "$ref": "common.schema.json#/definitions/deltaOperation" }],

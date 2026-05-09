@@ -11,13 +11,15 @@ authors = [
 description = "Standard MeshPack SDK"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "pydantic>=1.10.0"
+  "pydantic>=1.10.0",
+  "blake3>=0.4.1",
+  "cryptography>=41.0.0"
 ]
 
 [project.urls]

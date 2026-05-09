@@ -26,7 +26,7 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
   - `extensions/` — versioned extension schemas:
     `meshsync_geometry`, `meshsync_printability`, `meshsync_dependencies`, `meshsync_content`, `meshsync_thumbnails`
 - **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas for Python, Rust, TypeScript, and Java 17+.
-- **[`tools/`](tools/)**: Standalone tools (`meshpack_validate.py` — archive validator with JCS, signature, and path security checks).
+- **[`tools/`](tools/)**: Standalone tools (`meshpack_validate.py` — archive validator with JSON Schema modes, JCS, signature, and path/resource safety checks).
 - **[`tests/conformance/`](tests/conformance/)**: Conformance test suite (L1/L2/L3) with static fixture archives.
 - **[`samples/`](samples/)**: Example manifest and shard JSON files.
 - **[`docs/`](docs/)**: Release, schema hosting, conformance, validation, SDK quickstart, and additional reference documents.
@@ -65,6 +65,18 @@ The generator produces strongly-typed client libraries for core MeshPack reading
 - **Rust**: Serde structs with `zip` crate integration.
 - **TypeScript**: Typed interfaces with `jszip`, archive read/write helpers, entry hashing, validation, and model-entry listing.
 - **Java 17+**: Records/enums with Jackson JSON property mapping and a ZIP reader packaged with Maven.
+
+All generated SDK readers reject non-canonical `resource_ref` / `preview_ref` values before resolving `resources/<name>`. The generated Python, Rust, TypeScript, and Java validators support SHA-2 and BLAKE3 `entries_hash` verification.
+
+## Validation
+
+The reference validator runs both structural checks and JSON Schema validation:
+
+```bash
+python3 tools/meshpack_validate.py sample.meshpack --schema-mode strict
+```
+
+`compat` mode is the default and reports unknown schema properties as warnings for forward-compatible inspection. `strict` mode treats unknown properties as errors and is the recommended release gate.
 
 ## Contributing
 

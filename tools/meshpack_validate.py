@@ -33,6 +33,10 @@ import sys
 import zipfile
 from typing import Iterable, List, Optional, Tuple
 
+from jsonschema import Draft7Validator
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT7
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -44,6 +48,110 @@ HASH_PATTERN = re.compile(
     r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
 )
 SUPPORTED_ALGOS = {"sha256", "sha512", "blake3"}
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCHEMA_DIR = os.path.join(REPO_DIR, "schema")
+EXTENSIONS_DIR = os.path.join(SCHEMA_DIR, "extensions")
+RESOURCE_REF_PATTERN = re.compile(
+    r"^([a-f0-9]{64}|[a-f0-9]{128})\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"
+)
+OFFICIAL_EXTENSION_SCHEMAS = {
+    "meshsync_content": "extensions/meshsync_content.schema.json",
+    "meshsync_dependencies": "extensions/meshsync_dependencies.schema.json",
+    "meshsync_geometry": "extensions/meshsync_geometry.schema.json",
+    "meshsync_printability": "extensions/meshsync_printability.schema.json",
+    "meshsync_thumbnails": "extensions/meshsync_thumbnails.schema.json",
+}
+
+
+def _load_schema(filename: str) -> dict:
+    with open(os.path.join(SCHEMA_DIR, filename), "r", encoding="utf-8") as schema_file:
+        return json.load(schema_file)
+
+
+def _schema_registry() -> Registry:
+    filenames = [
+        "common.schema.json",
+        "manifest.schema.json",
+        "shard.schema.json",
+        "sidecar.schema.json",
+        "validation-finding.schema.json",
+        *OFFICIAL_EXTENSION_SCHEMAS.values(),
+    ]
+    schemas = {filename: _load_schema(filename) for filename in filenames}
+    registry = Registry()
+    resources = []
+    for filename, schema in schemas.items():
+        resource = Resource.from_contents(schema, default_specification=DRAFT7)
+        schema_id = schema.get("$id")
+        if schema_id:
+            resources.append((schema_id, resource))
+        resources.append((f"https://meshsync.net/schemas/meshpack/2.0/{filename}", resource))
+    return registry.with_resources(resources)
+
+
+def _schema_validator(filename: str) -> Draft7Validator:
+    schema = _load_schema(filename)
+    return Draft7Validator(schema, registry=_schema_registry())
+
+
+def _json_pointer(parts: Iterable[object]) -> str:
+    encoded = []
+    for part in parts:
+        text = str(part).replace("~", "~0").replace("/", "~1")
+        encoded.append(text)
+    return "" if not encoded else "/" + "/".join(encoded)
+
+
+def validate_json_schema(instance: object, schema_filename: str, archive_path: str, schema_mode: str) -> List["Finding"]:
+    """Validate JSON against the canonical schema.
+
+    Compat mode keeps forward-compatibility: unknown properties are warnings,
+    while type, pattern, enum, and required-field failures remain errors.
+    Strict mode treats all schema failures as errors.
+    """
+    findings: List[Finding] = []
+    validator = _schema_validator(schema_filename)
+    for error in sorted(validator.iter_errors(instance), key=lambda item: list(item.path)):
+        pointer = _json_pointer(error.absolute_path)
+        is_unknown_property = error.validator == "additionalProperties"
+        severity = Severity.WARNING if schema_mode == "compat" and is_unknown_property else Severity.ERROR
+        code = "SCH-002" if is_unknown_property else "SCH-001"
+        location = archive_path + pointer
+        findings.append(Finding(severity, code, f"{location}: {error.message}"))
+    return findings
+
+
+def validate_official_extensions(extensions: object, archive_path: str, schema_mode: str) -> List["Finding"]:
+    """Validate official MeshSync extension envelopes against their schemas."""
+    findings: List[Finding] = []
+    if extensions is None:
+        return findings
+    if not isinstance(extensions, dict):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "SCH-001",
+                f"{archive_path}/extensions: extensions must be an object",
+            )
+        )
+        return findings
+
+    for extension_name, payload in extensions.items():
+        schema_filename = OFFICIAL_EXTENSION_SCHEMAS.get(extension_name)
+        if schema_filename is None:
+            continue
+        extension_path = f"{archive_path}/extensions/{extension_name}"
+        if not isinstance(payload, dict):
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "SCH-001",
+                    f"{extension_path}: official extension payload must be an object",
+                )
+            )
+            continue
+        findings.extend(validate_json_schema(payload, schema_filename, extension_path, schema_mode))
+    return findings
 
 # ---------------------------------------------------------------------------
 # Hash helpers
@@ -451,6 +559,51 @@ def check_hash_format(hash_value: str, shard_path: str, entry_path: str) -> List
     return findings
 
 
+def check_resource_ref(resource_ref: object, field_name: str, shard_path: str, entry_path: str) -> List[Finding]:
+    """Validate resource/preview references before using them as ZIP paths."""
+    findings: List[Finding] = []
+    if resource_ref is None or resource_ref == "":
+        return findings
+    if not isinstance(resource_ref, str):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "RES-004",
+                f"{field_name} for {shard_path}:{entry_path} must be a string",
+            )
+        )
+        return findings
+
+    if ":" in resource_ref:
+        findings.append(
+            Finding(
+                Severity.WARNING,
+                "RES-003",
+                f"{field_name} contains ':' in {shard_path}:{entry_path}. "
+                "Resource filenames should be hex-hash only with an extension, no algorithm prefix.",
+            )
+        )
+
+    unsafe_path = (
+        "/" in resource_ref
+        or "\\" in resource_ref
+        or PATH_TRAVERSAL_PATTERN.search(resource_ref)
+        or resource_ref.startswith("/")
+        or resource_ref.startswith("\\\\")
+        or (len(resource_ref) >= 2 and resource_ref[0].isalpha() and resource_ref[1] == ":")
+    )
+    if unsafe_path or not RESOURCE_REF_PATTERN.match(resource_ref):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "RES-004",
+                f"Unsafe or non-canonical {field_name} in {shard_path}:{entry_path}: {resource_ref}",
+            )
+        )
+
+    return findings
+
+
 def verify_entries_hash(
     entries: List[dict], algo: str, expected_hash: str
 ) -> Tuple[bool, str]:
@@ -462,7 +615,7 @@ def verify_entries_hash(
     return actual == expected_hash, actual
 
 
-def verify_shards(zf: zipfile.ZipFile, manifest: dict) -> List[Finding]:
+def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List[Finding]:
     """Validate all shards referenced by the manifest."""
     findings: List[Finding] = []
     algo = manifest.get("hash_algo", "sha256")
@@ -507,6 +660,8 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict) -> List[Finding]:
                 Finding(Severity.ERROR, "SHD-003", f"Failed to parse {shard_path}: {exc}")
             )
             continue
+
+        findings.extend(validate_json_schema(shard, "shard.schema.json", shard_path, schema_mode))
 
         entries = shard.get("entries", [])
 
@@ -556,6 +711,15 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict) -> List[Finding]:
             # Path constraints
             findings.extend(check_entry_path(entry, shard_path))
 
+            # Official extension payloads
+            findings.extend(
+                validate_official_extensions(
+                    entry.get("extensions"),
+                    f"{shard_path}:{entry_path}",
+                    schema_mode,
+                )
+            )
+
             # Hash format
             entry_hash = entry.get("hash", "")
             findings.extend(check_hash_format(entry_hash, shard_path, entry_path))
@@ -574,6 +738,7 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict) -> List[Finding]:
 
             # Resource file presence
             if resource_ref:
+                findings.extend(check_resource_ref(resource_ref, "resource_ref", shard_path, entry_path))
                 resource_path = f"resources/{resource_ref}"
                 if resource_path not in zf.namelist():
                     findings.append(
@@ -583,15 +748,17 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict) -> List[Finding]:
                             f"Missing embedded resource: {resource_path} (referenced by {entry_path})",
                         )
                     )
-                # Resource ref should be hex-only (no algo prefix, no colons)
-                if ":" in resource_ref:
+
+            preview_ref = entry.get("preview_ref")
+            if preview_ref:
+                findings.extend(check_resource_ref(preview_ref, "preview_ref", shard_path, entry_path))
+                preview_path = f"resources/{preview_ref}"
+                if preview_path not in zf.namelist():
                     findings.append(
                         Finding(
-                            Severity.WARNING,
-                            "RES-003",
-                            f"resource_ref contains ':' in {shard_path}:{entry_path}. "
-                            "Resource filenames should be hex-hash only (e.g., 'a1b2c3...ext'), "
-                            "no algorithm prefix.",
+                            Severity.ERROR,
+                            "RES-002",
+                            f"Missing embedded resource: {preview_path} (referenced by {entry_path})",
                         )
                     )
 
@@ -599,7 +766,11 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict) -> List[Finding]:
 
 
 def verify_sidecar(
-    meshpack_path: str, sidecar_path: Optional[str], manifest: dict
+    meshpack_path: str,
+    sidecar_path: Optional[str],
+    manifest: dict,
+    schema_mode: str,
+    verify_sigs: bool = False,
 ) -> List[Finding]:
     """Verify pack integrity using the .meshpack.integrity sidecar file."""
     findings: List[Finding] = []
@@ -630,9 +801,43 @@ def verify_sidecar(
         )
         return findings
 
+    findings.extend(validate_json_schema(sidecar, "sidecar.schema.json", sidecar_path, schema_mode))
+    findings.extend(validate_official_extensions(sidecar.get("extensions"), sidecar_path, schema_mode))
+
+    pack_name = sidecar.get("pack_name")
+    if pack_name and pack_name != os.path.basename(meshpack_path):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "SDC-006",
+                f"Sidecar pack_name mismatch: sidecar expects {pack_name}, archive is {os.path.basename(meshpack_path)}",
+            )
+        )
+
+    pack_size_bytes = sidecar.get("pack_size_bytes")
+    if isinstance(pack_size_bytes, int):
+        actual_size = os.path.getsize(meshpack_path)
+        if pack_size_bytes != actual_size:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "SDC-007",
+                    f"Sidecar pack_size_bytes mismatch: sidecar expects {pack_size_bytes}, archive is {actual_size}",
+                )
+            )
+
     # Verify pack_hash
     sidecar_algo = sidecar.get("hash_algo", "")
     sidecar_hash = sidecar.get("pack_hash", "")
+    manifest_algo = manifest.get("hash_algo", "") if manifest else ""
+    if sidecar_algo and manifest_algo and sidecar_algo != manifest_algo:
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "SDC-008",
+                f"Sidecar hash_algo mismatch: sidecar uses {sidecar_algo}, manifest uses {manifest_algo}",
+            )
+        )
     if not sidecar_algo or not sidecar_hash:
         findings.append(
             Finding(Severity.WARNING, "SDC-003", "Sidecar missing hash_algo or pack_hash")
@@ -665,9 +870,10 @@ def verify_sidecar(
             Finding(Severity.INFO, "SDC-010", "Pack hash verified successfully via sidecar.")
         )
 
-    # Verify signatures field if present
     signatures = sidecar.get("signatures")
-    if signatures:
+    if signatures and verify_sigs:
+        findings.extend(verify_signature_entries(signatures, sidecar_hash))
+    elif signatures:
         findings.append(
             Finding(
                 Severity.INFO,
@@ -731,7 +937,8 @@ def verify_signature_entries(
 
         if alg == "ed25519":
             try:
-                key = Ed25519PublicKey.from_public_bytes(pub_key_bytes)
+                key_bytes = pub_key_bytes if len(pub_key_bytes) == 32 else pub_key_bytes[-32:]
+                key = Ed25519PublicKey.from_public_bytes(key_bytes)
                 key.verify(sig_bytes, signed_data)
                 findings.append(
                     Finding(Severity.INFO, "SIG-010",
@@ -775,9 +982,12 @@ def validate(
     max_size: int = MAX_DECOMPRESSED_SIZE,
     max_ratio: int = MAX_COMPRESSION_RATIO,
     verify_sigs: bool = False,
+    schema_mode: str = "compat",
 ) -> List[Finding]:
     """Run all validation checks on a .meshpack archive."""
     findings: List[Finding] = []
+    if schema_mode not in {"compat", "strict"}:
+        raise ValueError("schema_mode must be 'compat' or 'strict'")
 
     # Open archive
     try:
@@ -804,25 +1014,18 @@ def validate(
 
         # Manifest field validation
         findings.extend(check_manifest_fields(manifest))
+        findings.extend(
+            validate_json_schema(manifest, "manifest.schema.json", "manifest.json", schema_mode)
+        )
+        findings.extend(
+            validate_official_extensions(manifest.get("extensions"), "manifest.json", schema_mode)
+        )
 
         # Shard validation
-        findings.extend(verify_shards(zf, manifest))
+        findings.extend(verify_shards(zf, manifest, schema_mode))
 
     # Sidecar verification (outside ZIP context — reads file from disk)
-    findings.extend(verify_sidecar(meshpack_path, sidecar_path, manifest))
-
-    # Signature verification (when requested)
-    if verify_sigs:
-        # Collect signatures from manifest and sidecar
-        all_signatures = manifest.get("signatures", []) if manifest else []
-        pack_hash = manifest.get("pack_hash", "") if manifest else ""
-        if all_signatures and pack_hash:
-            findings.extend(verify_signature_entries(all_signatures, pack_hash))
-        elif all_signatures and not pack_hash:
-            findings.append(
-                Finding(Severity.WARNING, "SIG-006",
-                        "Signatures present but no pack_hash to verify against")
-            )
+    findings.extend(verify_sidecar(meshpack_path, sidecar_path, manifest, schema_mode, verify_sigs))
 
     return findings
 
@@ -870,11 +1073,18 @@ def main() -> int:
         action="store_true",
         help="Verify cryptographic signatures (requires 'cryptography' package)",
     )
+    parser.add_argument(
+        "--schema-mode",
+        choices=("compat", "strict"),
+        default="compat",
+        help="Schema validation mode: compat warns on unknown fields; strict errors on all schema violations.",
+    )
     args = parser.parse_args()
 
     findings = validate(
         args.meshpack, args.sidecar, args.max_size, args.max_ratio,
         verify_sigs=args.verify_signatures,
+        schema_mode=args.schema_mode,
     )
 
     # Output

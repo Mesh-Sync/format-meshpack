@@ -1,13 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_dependencies.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_dependencies.schema.json",
   "title": "MeshSync Dependencies Extension",
   "description": "File dependencies for multi-file formats (OBJ+MTL, FBX with textures)",
   "type": "object",
   "properties": {
     "v1": {
       "type": "object",
-      "description": "Version 1 of the dependencies extension schema",
+      "description": "Deprecated pre-2.0 dependencies extension schema. Writers of MeshPack 2.0 archives SHOULD use v2 for path safety guarantees.",
       "properties": {
         "materials": {
           "type": "array",
@@ -24,8 +24,43 @@
           "items": { "type": "string" },
           "description": "Relative paths to other referenced model files"
         }
-      }
+      },
+      "additionalProperties": true
+    },
+    "v2": {
+      "type": "object",
+      "description": "Version 2 of the dependencies extension schema. Values are safe POSIX-relative FileEntry paths inside the pack index.",
+      "properties": {
+        "materials": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\\\]+$",
+            "maxLength": 1024
+          },
+          "description": "Relative FileEntry paths to material files (e.g., .mtl)"
+        },
+        "textures": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\\\]+$",
+            "maxLength": 1024
+          },
+          "description": "Relative FileEntry paths to texture files"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\\\]+$",
+            "maxLength": 1024
+          },
+          "description": "Relative FileEntry paths to other referenced model files"
+        }
+      },
+      "additionalProperties": false
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

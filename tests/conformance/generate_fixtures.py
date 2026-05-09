@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sys
+import hashlib
 
 # Ensure conftest/builder is importable
 sys.path.insert(0, os.path.dirname(__file__))
@@ -37,8 +38,7 @@ def _write(directory: str, name: str, data: bytes) -> None:
 def generate_minimal_l1() -> bytes:
     """Minimal L1-conforming archive: manifest + 1 shard + 1 entry."""
     b = MeshPackBuilder()
-    b.set_manifest_field("creator_info", {"tool": "generate_fixtures", "version": "1.0.0"})
-    b.set_manifest_field("platform_info", {"name": "test", "version": "1.0.0"})
+    b.set_manifest_field("creator_info", {"name": "MeshPack Fixture Generator"})
     entry = {
         "path": "models/cube.stl",
         "original_name": "cube.stl",
@@ -53,18 +53,22 @@ def generate_standard_l2() -> bytes:
     """L2-conforming archive: manifest + shard + resource + sidecar."""
     import json
     b = MeshPackBuilder()
-    b.set_manifest_field("creator_info", {"tool": "generate_fixtures", "version": "1.0.0"})
-    b.set_manifest_field("platform_info", {"name": "test", "version": "1.0.0"})
+    b.set_manifest_field("creator_info", {"name": "MeshPack Fixture Generator"})
+    resource_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+    resource_digest = hashlib.sha256(resource_bytes).hexdigest()
+    resource_ref = f"{resource_digest}.png"
     entry = {
         "path": "models/cube.stl",
         "original_name": "cube.stl",
         "size_bytes": 11,
         "hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "modified_at": "2026-01-01T00:00:00+00:00",
-        "resource_refs": ["thumbnails/cube.png"],
+        "resource_ref": resource_ref,
+        "resource_hash": f"sha256:{resource_digest}",
+        "resource_size_bytes": len(resource_bytes),
     }
     b.add_shard("part-00001", [entry], entries_count=1)
-    b.add_resource("thumbnails/cube.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    b.add_resource(resource_ref, resource_bytes)
 
     # Add sidecar
     sidecar = {
@@ -90,17 +94,18 @@ def generate_full_l3() -> bytes:
     """L3-conforming archive: manifest + shard with delta ops + extensions."""
     import json
     b = MeshPackBuilder()
-    b.set_manifest_field("creator_info", {"tool": "generate_fixtures", "version": "1.0.0"})
-    b.set_manifest_field("platform_info", {"name": "test", "version": "1.0.0"})
+    b.set_manifest_field("creator_info", {"name": "MeshPack Fixture Generator"})
     b.set_manifest_field("import_policy", {
         "id_conflict": "skip",
         "metamodel_merge": "strict",
     })
     b.set_manifest_field("extensions", {
-        "meshsync_geometry": {
+        "meshsync_content": {
             "v1": {
-                "units": "mm",
-                "coordinate_system": "right-handed-z-up",
+                "title": "MeshPack L3 fixture",
+                "description": "Reference archive with import policy and official extension metadata.",
+                "language": "en",
+                "tags": ["fixture", "l3"],
             }
         }
     })

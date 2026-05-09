@@ -1,5 +1,7 @@
 jinja2
 check-jsonschema
+jsonschema
+referencing
 build
 twine
 pytest

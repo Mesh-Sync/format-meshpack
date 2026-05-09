@@ -15,7 +15,7 @@ SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schema"
 REPO_DIR = SCHEMA_DIR.parent
 
 COMMON_REF_PREFIX = "common.schema.json#/definitions/"
-SCHEMA_ID_BASE = "https://meshsync.net/schemas/meshpack/1.1/"
+SCHEMA_ID_BASE = "https://meshsync.net/schemas/meshpack/2.0/"
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +89,8 @@ class TestCommonDefinitions:
     EXPECTED_DEFINITIONS = {
         "hashAlgorithm",
         "hashValue",
+        "resourceFilename",
+        "safeRelativePath",
         "semver",
         "namespacedId",
         "signatureEntry",
@@ -200,6 +202,7 @@ class TestShardRefs:
         "metamodelRole",
         "assemblyRole",
         "deltaOperation",
+        "safeRelativePath",
     }
 
     def test_shard_references_common_definitions(self, shard_schema):
@@ -209,6 +212,13 @@ class TestShardRefs:
             f"shard.schema.json should $ref these common definitions "
             f"but inlines them instead: {missing}"
         )
+
+    def test_resource_refs_use_canonical_filename_pattern(self, shard_schema):
+        file_entry = shard_schema["definitions"]["fileEntry"]["properties"]
+        expected_pattern = "^([a-f0-9]{64}|[a-f0-9]{128})\\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"
+
+        assert file_entry["resource_ref"]["pattern"] == expected_pattern
+        assert file_entry["preview_ref"]["pattern"] == expected_pattern
 
 
 class TestSidecarRefs:

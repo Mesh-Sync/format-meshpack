@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/common.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/common.schema.json",
   "title": "MeshPack Common Definitions",
   "description": "Shared type definitions referenced by manifest, shard, and sidecar schemas. Canonical source of truth for shared enums and patterns.",
   "definitions": {
@@ -13,6 +13,17 @@
       "type": "string",
       "description": "Prefixed hash value: {algorithm}:{lowercase_hex}",
       "pattern": "^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$"
+    },
+    "resourceFilename": {
+      "type": "string",
+      "description": "Flat filename inside resources/: {lowercase_hex_hash}.{extension}. The algorithm is implicit from manifest.hash_algo; algorithm prefixes and path separators are invalid.",
+      "pattern": "^([a-f0-9]{64}|[a-f0-9]{128})\\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "description": "POSIX-style relative FileEntry path. Absolute paths, drive letters, traversal segments, and backslashes are invalid.",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?![A-Za-z]:)[^\\\\]+$",
+      "maxLength": 1024
     },
     "semver": {
       "type": "string",

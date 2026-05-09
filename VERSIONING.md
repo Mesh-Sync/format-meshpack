@@ -25,4 +25,4 @@ The repository-level `VERSION` file is the single source for generated package v
 
 ## Schema URL Versioning
 
-Schema `$id` values use versioned minor-release URLs such as `https://meshsync.net/schemas/meshpack/1.1/manifest.schema.json`. Patch releases within the same minor line may update descriptions, examples, or non-semantic metadata without changing the URL base. Changes that alter validation behavior require a new minor or major line.
+Schema `$id` values use versioned minor-release URLs such as `https://meshsync.net/schemas/meshpack/2.0/manifest.schema.json`. Patch releases within the same minor line may update descriptions, examples, or non-semantic metadata without changing the URL base. Changes that alter validation behavior require a new minor or major line.

@@ -49,7 +49,13 @@ class MeshPackBuilder:
         self._manifest: Dict[str, Any] = {
             "format_version": "1.0.0",
             "created_at": "2026-01-01T00:00:00+00:00",
-            "workspace_id": "test-conformance",
+            "workspace_id": None,
+            "creator_info": {"name": "MeshPack Conformance Tests"},
+            "platform_info": {
+                "os": "linux",
+                "path_separator": "/",
+                "is_case_sensitive": True,
+            },
             "hash_algo": "sha256",
             "index_summary": {
                 "total_files": 0,

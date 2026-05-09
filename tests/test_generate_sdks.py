@@ -267,7 +267,7 @@ class TestLoadExtensionSchemas:
 
 class TestGenerationReleaseReadiness:
     def test_version_file_is_single_source(self):
-        assert load_version() == "1.1.0"
+        assert load_version() == "2.0.0"
 
     def test_load_version_rejects_invalid_semver(self, tmp_path):
         version_file = tmp_path / "VERSION"
@@ -331,6 +331,70 @@ class TestGenerationReleaseReadiness:
         ],
     )
     def test_sdk_templates_expose_validator_api(self, template_path, markers):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", *template_path),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        for marker in markers:
+            assert marker in contents
+
+    @pytest.mark.parametrize(
+        ("template_path", "markers"),
+        [
+            (
+                ("python", "models.py.j2"),
+                ["RESOURCE_REF_PATTERN", "def _check_resource_ref", "def _is_safe_resource_ref"],
+            ),
+            (
+                ("typescript", "index.ts.j2"),
+                ["RESOURCE_REF_PATTERN", "function validateResourceRef", "Unsafe or non-canonical resource name"],
+            ),
+            (
+                ("rust", "lib.rs.j2"),
+                ["fn is_safe_resource_ref", "fn validate_resource_ref", "RES-004"],
+            ),
+            (
+                ("java", "MeshPack.java.j2"),
+                ["RESOURCE_REF_PATTERN", "validateResourceRef", "RES-004"],
+            ),
+        ],
+    )
+    def test_sdk_templates_enforce_resource_ref_safety(self, template_path, markers):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", *template_path),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        for marker in markers:
+            assert marker in contents
+
+    @pytest.mark.parametrize(
+        ("template_path", "markers"),
+        [
+            (
+                ("python", "models.py.j2"),
+                ["def _check_sidecar", "SDC-010", "def _verify_signature_entries"],
+            ),
+            (
+                ("typescript", "index.ts.j2"),
+                ["validateSidecar", "SDC-010", "verifySignatureEntries"],
+            ),
+            (
+                ("rust", "lib.rs.j2"),
+                ["verify_sidecar", "SDC-010", "verify_signature_entries"],
+            ),
+            (
+                ("java", "MeshPack.java.j2"),
+                ["verifySidecar", "SDC-010", "verifySignatureEntries"],
+            ),
+        ],
+    )
+    def test_sdk_templates_verify_sidecar_integrity(self, template_path, markers):
         with open(
             os.path.join(REPO_ROOT, "generators", "templates", *template_path),
             "r",

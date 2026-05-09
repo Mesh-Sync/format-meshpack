@@ -1,7 +1,9 @@
-import { createHash } from 'crypto';
+import { constants, createHash, createPublicKey, verify as verifySignature } from 'crypto';
+import { blake3 } from '@noble/hashes/blake3';
 import JSZip from 'jszip';
 
 export const VERSION = "{{ version }}";
+const RESOURCE_REF_PATTERN = /^([a-f0-9]{64}|[a-f0-9]{128})\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 
 {% macro ts_base(t) -%}
 {%- if t.is_array -%}
@@ -51,6 +53,12 @@ export interface MeshPackValidationResult {
   findings: MeshPackValidationFinding[];
   errors: MeshPackValidationFinding[];
   warnings: MeshPackValidationFinding[];
+}
+
+export interface MeshPackValidationOptions {
+  sidecar?: Sidecar | string | Uint8Array | ArrayBuffer;
+  archiveName?: string;
+  verifySignatures?: boolean;
 }
 
 export interface MeshPackValidationFinding {
@@ -133,6 +141,9 @@ export class MeshPackReader {
     if (!entry.resource_ref) {
       return null;
     }
+    if (!isSafeResourceRef(entry.resource_ref)) {
+      return null;
+    }
     const file = this.zip.file(`resources/${entry.resource_ref}`);
     return file ? file.async(type) : null;
   }
@@ -140,6 +151,10 @@ export class MeshPackReader {
   validateIntegrity(): string[] {
     const missing: string[] = [];
     for (const entry of this.fileMap.values()) {
+      if (entry.resource_ref && !isSafeResourceRef(entry.resource_ref)) {
+        missing.push(entry.path);
+        continue;
+      }
       if (entry.resource_ref && !this.zip.file(`resources/${entry.resource_ref}`)) {
         missing.push(entry.path);
       }
@@ -171,13 +186,19 @@ export async function writeMeshPack(input: WriteMeshPackInput): Promise<Uint8Arr
   }
 
   for (const [name, content] of Object.entries(input.resources ?? {})) {
+    if (!isSafeResourceRef(name)) {
+      throw new Error(`Unsafe or non-canonical resource name: ${name}`);
+    }
     zip.file(`resources/${name}`, content);
   }
 
   return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 }
 
-export async function validateMeshPack(data: ArrayBuffer | Uint8Array): Promise<MeshPackValidationResult> {
+export async function validateMeshPack(
+  data: ArrayBuffer | Uint8Array,
+  options: MeshPackValidationOptions = {}
+): Promise<MeshPackValidationResult> {
   const findings: MeshPackValidationFinding[] = [];
   try {
     const zip = await JSZip.loadAsync(data);
@@ -239,14 +260,17 @@ export async function validateMeshPack(data: ArrayBuffer | Uint8Array): Promise<
         if (entry.resource_ref && !entry.resource_hash) {
           findings.push(finding("WARNING", "RES-001", `${shardPath}:${entry.path} has resource_ref but missing resource_hash`));
         }
+        findings.push(...validateResourceRef(entry.resource_ref, "resource_ref", shardPath, entry.path));
         if (entry.resource_ref && !namesSet.has(`resources/${entry.resource_ref}`)) {
           findings.push(finding("ERROR", "RES-002", `Missing embedded resource: resources/${entry.resource_ref}`));
         }
-        if (entry.resource_ref?.includes(":")) {
-          findings.push(finding("WARNING", "RES-003", `resource_ref contains ':' in ${shardPath}:${entry.path}`));
+        findings.push(...validateResourceRef(entry.preview_ref, "preview_ref", shardPath, entry.path));
+        if (entry.preview_ref && !namesSet.has(`resources/${entry.preview_ref}`)) {
+          findings.push(finding("ERROR", "RES-002", `Missing embedded resource: resources/${entry.preview_ref}`));
         }
       }
     }
+    findings.push(...validateSidecar(data, manifest, options));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     findings.push(finding(message.includes("manifest.json") ? "ERROR" : "ERROR", message.includes("manifest.json") ? "MAN-001" : "ARC-001", message));
@@ -258,6 +282,136 @@ export async function validateMeshPack(data: ArrayBuffer | Uint8Array): Promise<
 
 function finding(severity: MeshPackValidationFinding["severity"], code: string, message: string): MeshPackValidationFinding {
   return { severity, code, message };
+}
+
+function validateSidecar(
+  archiveData: ArrayBuffer | Uint8Array,
+  manifest: Manifest,
+  options: MeshPackValidationOptions
+): MeshPackValidationFinding[] {
+  const findings: MeshPackValidationFinding[] = [];
+  if (!options.sidecar) {
+    return [finding("INFO", "SDC-001", "No .meshpack.integrity sidecar provided; skipping pack-level hash verification.")];
+  }
+
+  let sidecar: Sidecar;
+  try {
+    sidecar = parseSidecar(options.sidecar);
+  } catch (error) {
+    return [finding("ERROR", "SDC-002", `Failed to load sidecar: ${error instanceof Error ? error.message : String(error)}`)];
+  }
+
+  if (options.archiveName && sidecar.pack_name && sidecar.pack_name !== options.archiveName) {
+    findings.push(finding("ERROR", "SDC-006", `Sidecar pack_name mismatch: sidecar expects ${sidecar.pack_name}, archive is ${options.archiveName}`));
+  }
+
+  const archiveBytes = toUint8Array(archiveData);
+  if (typeof sidecar.pack_size_bytes === "number" && sidecar.pack_size_bytes !== archiveBytes.byteLength) {
+    findings.push(finding("ERROR", "SDC-007", `Sidecar pack_size_bytes mismatch: sidecar expects ${sidecar.pack_size_bytes}, archive is ${archiveBytes.byteLength}`));
+  }
+
+  if (sidecar.hash_algo && manifest.hash_algo && sidecar.hash_algo !== manifest.hash_algo) {
+    findings.push(finding("ERROR", "SDC-008", `Sidecar hash_algo mismatch: sidecar uses ${sidecar.hash_algo}, manifest uses ${manifest.hash_algo}`));
+  }
+  if (!sidecar.hash_algo || !sidecar.pack_hash) {
+    findings.push(finding("WARNING", "SDC-003", "Sidecar missing hash_algo or pack_hash"));
+    return findings;
+  }
+
+  try {
+    const digest = computeDigest(archiveBytes, sidecar.hash_algo as HashAlgorithm);
+    const actual = sidecar.pack_hash.includes(":") ? `${sidecar.hash_algo}:${digest}` : digest;
+    if (actual !== sidecar.pack_hash) {
+      findings.push(finding("ERROR", "SDC-005", `Pack hash mismatch: sidecar expects ${sidecar.pack_hash}, computed ${actual}`));
+    } else {
+      findings.push(finding("INFO", "SDC-010", "Pack hash verified successfully via sidecar."));
+    }
+  } catch (error) {
+    findings.push(finding("WARNING", "SDC-004", error instanceof Error ? error.message : String(error)));
+    return findings;
+  }
+
+  if (sidecar.signatures && sidecar.signatures.length > 0 && options.verifySignatures) {
+    findings.push(...verifySignatureEntries(sidecar.signatures, sidecar.pack_hash));
+  } else if (sidecar.signatures && sidecar.signatures.length > 0) {
+    findings.push(finding("INFO", "SDC-011", `Sidecar contains ${sidecar.signatures.length} signature(s). Enable signature verification to check them.`));
+  }
+  return findings;
+}
+
+function parseSidecar(sidecar: Sidecar | string | Uint8Array | ArrayBuffer): Sidecar {
+  if (typeof sidecar === "string") {
+    return JSON.parse(sidecar) as Sidecar;
+  }
+  if (sidecar instanceof ArrayBuffer || sidecar instanceof Uint8Array) {
+    return JSON.parse(Buffer.from(toUint8Array(sidecar)).toString("utf8")) as Sidecar;
+  }
+  return sidecar;
+}
+
+function toUint8Array(data: ArrayBuffer | Uint8Array): Uint8Array {
+  return data instanceof Uint8Array ? data : new Uint8Array(data);
+}
+
+function computeDigest(data: Uint8Array, hashAlgo: HashAlgorithm): string {
+  if (hashAlgo === "blake3") {
+    return bytesToHex(blake3(data));
+  }
+  return createHash(hashAlgo).update(Buffer.from(data)).digest("hex");
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function verifySignatureEntries(signatures: SignatureEntry[], packHash: string): MeshPackValidationFinding[] {
+  const findings: MeshPackValidationFinding[] = [];
+  const signedData = Buffer.from(packHash, "utf8");
+
+  signatures.forEach((signatureEntry, index) => {
+    const signer = signatureEntry.signer_id ?? `signature[${index}]`;
+    if (!signatureEntry.alg || !signatureEntry.public_key || !signatureEntry.signature) {
+      findings.push(finding("ERROR", "SIG-002", `${signer}: missing required field (alg/public_key/signature)`));
+      return;
+    }
+
+    let publicKeyBytes: Buffer;
+    let signatureBytes: Buffer;
+    try {
+      publicKeyBytes = Buffer.from(signatureEntry.public_key, "base64");
+      signatureBytes = Buffer.from(signatureEntry.signature, "base64");
+    } catch (error) {
+      findings.push(finding("ERROR", "SIG-003", `${signer}: invalid base64 encoding - ${error instanceof Error ? error.message : String(error)}`));
+      return;
+    }
+
+    try {
+      if (signatureEntry.alg === "ed25519") {
+        const keyBytes = publicKeyBytes.byteLength === 32
+          ? Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), publicKeyBytes])
+          : publicKeyBytes;
+        const key = createPublicKey({ key: keyBytes, format: "der", type: "spki" });
+        if (verifySignature(null, signedData, key, signatureBytes)) {
+          findings.push(finding("INFO", "SIG-010", `${signer}: Ed25519 signature verified successfully`));
+        } else {
+          findings.push(finding("ERROR", "SIG-004", `${signer}: Ed25519 signature verification failed`));
+        }
+      } else if (signatureEntry.alg === "rsa-pss-sha256") {
+        const key = createPublicKey({ key: publicKeyBytes, format: "der", type: "spki" });
+        if (verifySignature("sha256", signedData, { key, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: constants.RSA_PSS_SALTLEN_MAX_SIGN }, signatureBytes)) {
+          findings.push(finding("INFO", "SIG-010", `${signer}: RSA-PSS-SHA256 signature verified successfully`));
+        } else {
+          findings.push(finding("ERROR", "SIG-004", `${signer}: RSA-PSS-SHA256 signature verification failed`));
+        }
+      } else {
+        findings.push(finding("INFO", "SIG-005", `${signer}: unsupported algorithm '${signatureEntry.alg}' - skipped`));
+      }
+    } catch (error) {
+      findings.push(finding("ERROR", "SIG-004", `${signer}: ${signatureEntry.alg} signature verification failed - ${error instanceof Error ? error.message : String(error)}`));
+    }
+  });
+
+  return findings;
 }
 
 function validateEntry(entry: FileEntry, shardPath: string): MeshPackValidationFinding[] {
@@ -283,6 +437,32 @@ function validateEntry(entry: FileEntry, shardPath: string): MeshPackValidationF
   return findings;
 }
 
+function isSafeResourceRef(resourceRef: string): boolean {
+  return RESOURCE_REF_PATTERN.test(resourceRef) && !/[\\/:]/.test(resourceRef);
+}
+
+function validateResourceRef(
+  resourceRef: unknown,
+  fieldName: string,
+  shardPath: string,
+  entryPath: string
+): MeshPackValidationFinding[] {
+  if (resourceRef === undefined || resourceRef === null || resourceRef === "") {
+    return [];
+  }
+  if (typeof resourceRef !== "string") {
+    return [finding("ERROR", "RES-004", `${fieldName} for ${shardPath}:${entryPath} must be a string`)];
+  }
+  const findings: MeshPackValidationFinding[] = [];
+  if (resourceRef.includes(":")) {
+    findings.push(finding("WARNING", "RES-003", `${fieldName} contains ':' in ${shardPath}:${entryPath}`));
+  }
+  if (!isSafeResourceRef(resourceRef)) {
+    findings.push(finding("ERROR", "RES-004", `Unsafe or non-canonical ${fieldName} in ${shardPath}:${entryPath}: ${resourceRef}`));
+  }
+  return findings;
+}
+
 export function listModelEntries(entries: FileEntry[]): FileEntry[] {
   const modelExtensions = [".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"];
   return entries.filter((entry) => {
@@ -292,11 +472,8 @@ export function listModelEntries(entries: FileEntry[]): FileEntry[] {
 }
 
 export function computeEntriesHash(entries: FileEntry[], hashAlgo: HashAlgorithm = "sha256"): string {
-  if (hashAlgo === "blake3") {
-    throw new Error("BLAKE3 hashing is not available in the TypeScript SDK runtime");
-  }
   const sortedEntries = [...entries].sort((a, b) => a.path.localeCompare(b.path));
-  const digest = createHash(hashAlgo).update(canonicalStringify(sortedEntries), "utf8").digest("hex");
+  const digest = computeDigest(Buffer.from(canonicalStringify(sortedEntries), "utf8"), hashAlgo);
   return `${hashAlgo}:${digest}`;
 }
 
@@ -406,15 +583,25 @@ export interface {{ model.name }} {
 {% endfor %}
 {% endfor %}
 {% for ext in extensions %}
+{% set func_name = ext.name | replace('meshsync_', '') | title | replace('_', '') %}
+{% set root = namespace(models=[]) %}
 {% for version_name, ext_models in ext.version_models.items() %}
 {% for model in ext_models %}
 {% if model.is_root %}
-{% set func_name = ext.name | replace('meshsync_', '') | title | replace('_', '') %}
-export function get{{ func_name }}(extensions: Record<string, unknown> | undefined): {{ model.name }} | undefined {
-  return getBestExtension<{{ model.name }}>(extensions, ExtensionNames.{{ ext.name | upper }}, "{{ version_name }}")?.data;
-}
-
+{% set root.models = root.models + [{"version": version_name, "name": model.name}] %}
 {% endif %}
 {% endfor %}
+{% endfor %}
+export type {{ func_name }}Extension = {{ root.models | map(attribute='name') | join(' | ') }};
+
+export function get{{ func_name }}(extensions: Record<string, unknown> | undefined): {{ func_name }}Extension | undefined {
+  return getLatestExtension<{{ func_name }}Extension>(extensions, ExtensionNames.{{ ext.name | upper }})?.data;
+}
+
+{% for model in root.models %}
+export function get{{ func_name }}{{ model.version | title }}(extensions: Record<string, unknown> | undefined): {{ model.name }} | undefined {
+  return getExtensionVersion<{{ model.name }}>(extensions, ExtensionNames.{{ ext.name | upper }}, "{{ model.version }}");
+}
+
 {% endfor %}
 {% endfor %}

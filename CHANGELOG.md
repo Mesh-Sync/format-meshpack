@@ -9,9 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **IANA Media Type Registration**: `definition/iana-media-type-registration.md` — RFC 6838 registration template for `application/vnd.meshsync.meshpack+zip` (#21)
+- **MeshPack 2.0 Schema Line**: versioned schema IDs and catalog URLs now use `/schemas/meshpack/2.0/`
 
 ### Changed
 - **Spec §2.5**: Reference IANA registration template and RFC 6839 structured syntax suffix
+- **Resource References**: `resource_ref`, `preview_ref`, and thumbnail extension references now use flat resource filenames (`{hex}.{ext}`) instead of prefixed hash strings
+- **Official Extensions**: `meshsync_thumbnails.v2` and `meshsync_dependencies.v2` define the public 2.0 shapes; official extension payloads are schema-validated by the Python reference validator
+
+### Removed
+- **Unsupported Rename Operation Docs**: migration docs no longer advertise `operation: "rename"` or `previous_path`, which are not part of the canonical shard schema
 
 ## [1.1.0] - 2026-03-06
 

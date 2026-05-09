@@ -6,7 +6,7 @@ Provides utilities for reading and writing versioned MeshSync extensions.
 Extensions follow the pattern: { "meshsync_<name>": { "v1": {...}, "v2": {...} } }
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
 
@@ -216,15 +216,31 @@ Any
 # ----- Convenience Functions -----
 
 {% for ext in extensions %}
+{% set helper_name = ext.name | replace('meshsync_', '') %}
+{% set root = namespace(models=[]) %}
 {% for version_name, ext_models in ext.version_models.items() %}
 {% for model in ext_models %}
 {% if model.is_root %}
-{% set func_name = ext.name | replace('meshsync_', '') | title | replace('_', '') %}
-def get_{{ ext.name | replace('meshsync_', '') }}(extensions: Dict[str, Any]) -> Optional[{{ model.name }}]:
-    """Get {{ ext.name }} {{ version_name }} extension."""
-    return {{ model.name }}.from_extensions(extensions)
-
+{% set root.models = root.models + [{"version": version_name, "name": model.name}] %}
 {% endif %}
 {% endfor %}
+{% endfor %}
+def get_{{ helper_name }}(extensions: Dict[str, Any]) -> Optional[Union[{% for model in root.models %}{{ model.name }}{% if not loop.last %}, {% endif %}{% endfor %}]]:
+    """Get the latest available {{ ext.name }} extension version."""
+    version, data = get_latest_extension(extensions, "{{ ext.name }}")
+    if data is None:
+        return None
+{% for model in root.models %}
+    if version == "{{ model.version }}":
+        return {{ model.name }}.from_dict(data)
+{% endfor %}
+    return None
+
+{% for model in root.models %}
+def get_{{ helper_name }}_{{ model.version }}(extensions: Dict[str, Any]) -> Optional[{{ model.name }}]:
+    """Get {{ ext.name }} {{ model.version }} extension."""
+    data = get_extension_version(extensions, "{{ ext.name }}", "{{ model.version }}")
+    return {{ model.name }}.from_dict(data) if data is not None else None
+
 {% endfor %}
 {% endfor %}

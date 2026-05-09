@@ -1,20 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/catalog.json",
-  "format_version": "1.1.0",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/catalog.json",
+  "format_version": "2.0.0",
   "draft": "http://json-schema.org/draft-07/schema#",
   "latest_alias": "https://meshsync.net/schemas/meshpack/latest/",
   "schemas": {
-    "common": "https://meshsync.net/schemas/meshpack/1.1/common.schema.json",
-    "manifest": "https://meshsync.net/schemas/meshpack/1.1/manifest.schema.json",
-    "shard": "https://meshsync.net/schemas/meshpack/1.1/shard.schema.json",
-    "sidecar": "https://meshsync.net/schemas/meshpack/1.1/sidecar.schema.json"
+    "common": "https://meshsync.net/schemas/meshpack/2.0/common.schema.json",
+    "manifest": "https://meshsync.net/schemas/meshpack/2.0/manifest.schema.json",
+    "shard": "https://meshsync.net/schemas/meshpack/2.0/shard.schema.json",
+    "sidecar": "https://meshsync.net/schemas/meshpack/2.0/sidecar.schema.json"
   },
   "extensions": {
-    "meshsync_content": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_content.schema.json",
-    "meshsync_dependencies": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_dependencies.schema.json",
-    "meshsync_geometry": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_geometry.schema.json",
-    "meshsync_printability": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_printability.schema.json",
-    "meshsync_thumbnails": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_thumbnails.schema.json"
+    "meshsync_content": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_content.schema.json",
+    "meshsync_dependencies": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_dependencies.schema.json",
+    "meshsync_geometry": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_geometry.schema.json",
+    "meshsync_printability": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_printability.schema.json",
+    "meshsync_thumbnails": "https://meshsync.net/schemas/meshpack/2.0/extensions/meshsync_thumbnails.schema.json"
   }
 }

@@ -5,7 +5,7 @@
 This document contains the IANA media type registration template for the
 MeshPack container format, following [RFC 6838 §5.6](https://www.rfc-editor.org/rfc/rfc6838#section-5.6).
 
-**Registration status**: PRE-SUBMISSION — this template is maintained for public review and will be submitted after the `1.1.0` schema URLs are publicly hosted.
+**Registration status**: PRE-SUBMISSION — this template is maintained for public review and will be submitted after the `2.0.0` schema URLs are publicly hosted.
 
 ---
 
@@ -63,7 +63,7 @@ https://github.com/Mesh-Sync/standard-meshpack
 
 Versioned schemas are published under:
 
-https://meshsync.net/schemas/meshpack/1.1/
+https://meshsync.net/schemas/meshpack/2.0/
 
 **Applications which use this media type**:
 

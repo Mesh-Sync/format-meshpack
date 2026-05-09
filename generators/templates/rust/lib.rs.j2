@@ -1,11 +1,14 @@
 use chrono::{DateTime, Utc};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::{Signature as Ed25519Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::convert::TryInto;
+use std::fs::{self, File};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use typed_builder::TypedBuilder;
 use zip::{CompressionMethod, ZipArchive};
 
@@ -145,6 +148,9 @@ impl MeshPackReader {
 
     pub fn read_resource(&mut self, entry: &FileEntry) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         if let Some(resource_ref) = &entry.resource_ref {
+            if !is_safe_resource_ref(resource_ref) {
+                return Ok(None);
+            }
             let path = format!("resources/{resource_ref}");
             let mut file = match self.archive.by_name(&path) {
                 Ok(file) => file,
@@ -171,6 +177,12 @@ pub struct ValidationResult {
     pub findings: Vec<ValidationFinding>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ValidationOptions {
+    pub sidecar_path: Option<PathBuf>,
+    pub verify_signatures: bool,
+}
+
 impl ValidationResult {
     pub fn is_valid(&self) -> bool {
         !self.findings.iter().any(|finding| finding.severity == "ERROR")
@@ -186,8 +198,16 @@ impl ValidationResult {
 }
 
 pub fn validate_meshpack<P: AsRef<Path>>(path: P) -> Result<ValidationResult, Box<dyn std::error::Error>> {
+    validate_meshpack_with_options(path, ValidationOptions::default())
+}
+
+pub fn validate_meshpack_with_options<P: AsRef<Path>>(
+    path: P,
+    options: ValidationOptions,
+) -> Result<ValidationResult, Box<dyn std::error::Error>> {
     let mut result = ValidationResult::default();
-    let file = match File::open(path.as_ref()) {
+    let path_ref = path.as_ref();
+    let file = match File::open(path_ref) {
         Ok(file) => file,
         Err(error) => {
             result.findings.push(finding("ERROR", "ARC-001", format!("Cannot open archive: {error}")));
@@ -289,15 +309,21 @@ pub fn validate_meshpack<P: AsRef<Path>>(path: P) -> Result<ValidationResult, Bo
                 if entry.resource_hash.is_none() {
                     result.findings.push(finding("WARNING", "RES-001", format!("{shard_path}:{} has resource_ref but missing resource_hash", entry.path)));
                 }
+                validate_resource_ref(resource_ref, "resource_ref", &shard_path, &entry.path, &mut result.findings);
                 if !names_set.contains(&format!("resources/{resource_ref}")) {
                     result.findings.push(finding("ERROR", "RES-002", format!("Missing embedded resource: resources/{resource_ref}")));
                 }
-                if resource_ref.contains(':') {
-                    result.findings.push(finding("WARNING", "RES-003", format!("resource_ref contains ':' in {shard_path}:{}", entry.path)));
+            }
+            if let Some(preview_ref) = &entry.preview_ref {
+                validate_resource_ref(preview_ref, "preview_ref", &shard_path, &entry.path, &mut result.findings);
+                if !names_set.contains(&format!("resources/{preview_ref}")) {
+                    result.findings.push(finding("ERROR", "RES-002", format!("Missing embedded resource: resources/{preview_ref}")));
                 }
             }
         }
     }
+
+    verify_sidecar(path_ref, &manifest, options.sidecar_path.as_deref(), options.verify_signatures, &mut result.findings);
 
     Ok(result)
 }
@@ -338,6 +364,171 @@ fn validate_entry_path(path: &str, shard_path: &str, findings: &mut Vec<Validati
     }
 }
 
+fn is_safe_resource_ref(value: &str) -> bool {
+    if value.contains('/') || value.contains('\\') || value.contains(':') {
+        return false;
+    }
+    let Some((hex, extension)) = value.split_once('.') else { return false; };
+    let hex_valid = (hex.len() == 64 || hex.len() == 128)
+        && hex.chars().all(|item| item.is_ascii_hexdigit() && !item.is_ascii_uppercase());
+    let extension_valid = !extension.is_empty()
+        && extension.len() <= 32
+        && extension.chars().all(|item| item.is_ascii_alphanumeric() || item == '.' || item == '_' || item == '-');
+    hex_valid && extension_valid
+}
+
+fn validate_resource_ref(
+    resource_ref: &str,
+    field_name: &str,
+    shard_path: &str,
+    entry_path: &str,
+    findings: &mut Vec<ValidationFinding>,
+) {
+    if resource_ref.contains(':') {
+        findings.push(finding("WARNING", "RES-003", format!("{field_name} contains ':' in {shard_path}:{entry_path}")));
+    }
+    if !is_safe_resource_ref(resource_ref) {
+        findings.push(finding("ERROR", "RES-004", format!("Unsafe or non-canonical {field_name} in {shard_path}:{entry_path}: {resource_ref}")));
+    }
+}
+
+fn verify_sidecar(
+    meshpack_path: &Path,
+    manifest: &Manifest,
+    sidecar_path: Option<&Path>,
+    verify_signatures: bool,
+    findings: &mut Vec<ValidationFinding>,
+) {
+    let auto_path = PathBuf::from(format!("{}.integrity", meshpack_path.to_string_lossy()));
+    let sidecar_path = sidecar_path.or_else(|| auto_path.exists().then_some(auto_path.as_path()));
+    let Some(sidecar_path) = sidecar_path else {
+        findings.push(finding("INFO", "SDC-001", "No .meshpack.integrity sidecar found; skipping pack-level hash verification."));
+        return;
+    };
+
+    let sidecar_content = match fs::read_to_string(sidecar_path) {
+        Ok(content) => content,
+        Err(error) => {
+            findings.push(finding("ERROR", "SDC-002", format!("Failed to load sidecar: {error}")));
+            return;
+        }
+    };
+    let sidecar: Sidecar = match serde_json::from_str(&sidecar_content) {
+        Ok(sidecar) => sidecar,
+        Err(error) => {
+            findings.push(finding("ERROR", "SCH-001", format!("Sidecar schema validation failed: {error}")));
+            return;
+        }
+    };
+
+    if let Some(file_name) = meshpack_path.file_name().and_then(|item| item.to_str()) {
+        if sidecar.pack_name != file_name {
+            findings.push(finding("ERROR", "SDC-006", format!("Sidecar pack_name mismatch: sidecar expects {}, archive is {file_name}", sidecar.pack_name)));
+        }
+    }
+
+    match fs::metadata(meshpack_path) {
+        Ok(metadata) if metadata.len() != sidecar.pack_size_bytes => findings.push(finding("ERROR", "SDC-007", format!("Sidecar pack_size_bytes mismatch: sidecar expects {}, archive is {}", sidecar.pack_size_bytes, metadata.len()))),
+        Err(error) => findings.push(finding("WARNING", "SDC-004", format!("Failed to read archive metadata: {error}"))),
+        _ => {}
+    }
+
+    if sidecar.hash_algo != manifest.hash_algo {
+        findings.push(finding("ERROR", "SDC-008", format!("Sidecar hash_algo mismatch: sidecar uses {}, manifest uses {}", sidecar.hash_algo, manifest.hash_algo)));
+    }
+
+    let archive_bytes = match fs::read(meshpack_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            findings.push(finding("WARNING", "SDC-004", format!("Failed to read archive bytes: {error}")));
+            return;
+        }
+    };
+    let digest = match compute_digest_hex(&archive_bytes, &sidecar.hash_algo) {
+        Ok(digest) => digest,
+        Err(error) => {
+            findings.push(finding("WARNING", "SDC-004", error));
+            return;
+        }
+    };
+    let actual = if sidecar.pack_hash.contains(':') { format!("{}:{digest}", sidecar.hash_algo) } else { digest };
+    if actual != sidecar.pack_hash {
+        findings.push(finding("ERROR", "SDC-005", format!("Pack hash mismatch: sidecar expects {}, computed {actual}", sidecar.pack_hash)));
+    } else {
+        findings.push(finding("INFO", "SDC-010", "Pack hash verified successfully via sidecar."));
+    }
+
+    if let Some(signatures) = &sidecar.signatures {
+        if !signatures.is_empty() && verify_signatures {
+            findings.extend(verify_signature_entries(signatures, &sidecar.pack_hash));
+        } else if !signatures.is_empty() {
+            findings.push(finding("INFO", "SDC-011", format!("Sidecar contains {} signature(s). Enable signature verification to check them.", signatures.len())));
+        }
+    }
+}
+
+fn verify_signature_entries(signatures: &[SignatureEntry], pack_hash: &str) -> Vec<ValidationFinding> {
+    let mut findings = Vec::new();
+    for (index, signature_entry) in signatures.iter().enumerate() {
+        let signer = signature_entry.signer_id.as_deref().unwrap_or("signature");
+        let signer = if signer == "signature" { format!("signature[{index}]") } else { signer.to_string() };
+        let public_key_bytes = match BASE64.decode(&signature_entry.public_key) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                findings.push(finding("ERROR", "SIG-003", format!("{signer}: invalid base64 encoding - {error}")));
+                continue;
+            }
+        };
+        let signature_bytes = match BASE64.decode(&signature_entry.signature) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                findings.push(finding("ERROR", "SIG-003", format!("{signer}: invalid base64 encoding - {error}")));
+                continue;
+            }
+        };
+
+        if signature_entry.alg == "ed25519" {
+            let key_bytes = if public_key_bytes.len() == 32 {
+                public_key_bytes.as_slice()
+            } else if public_key_bytes.len() > 32 {
+                &public_key_bytes[public_key_bytes.len() - 32..]
+            } else {
+                findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 public key must be 32 bytes")));
+                continue;
+            };
+            let key_array: [u8; 32] = match key_bytes.try_into() {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 public key must be 32 bytes")));
+                    continue;
+                }
+            };
+            let key = match VerifyingKey::from_bytes(&key_array) {
+                Ok(key) => key,
+                Err(error) => {
+                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 public key failed to load - {error}")));
+                    continue;
+                }
+            };
+            let signature = match Ed25519Signature::from_slice(&signature_bytes) {
+                Ok(signature) => signature,
+                Err(error) => {
+                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 signature failed to load - {error}")));
+                    continue;
+                }
+            };
+            if key.verify(pack_hash.as_bytes(), &signature).is_ok() {
+                findings.push(finding("INFO", "SIG-010", format!("{signer}: Ed25519 signature verified successfully")));
+            } else {
+                findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 signature verification failed")));
+            }
+        } else {
+            findings.push(finding("INFO", "SIG-005", format!("{signer}: unsupported algorithm '{}' - skipped", signature_entry.alg)));
+        }
+    }
+    findings
+}
+
 fn compute_entries_hash(entries: &[Value], algo: &str) -> Result<String, String> {
     let mut sorted_entries = entries.to_vec();
     sorted_entries.sort_by(|left, right| {
@@ -346,13 +537,17 @@ fn compute_entries_hash(entries: &[Value], algo: &str) -> Result<String, String>
         left_path.cmp(right_path)
     });
     let encoded = canonical_json(&Value::Array(sorted_entries));
-    let digest = match algo {
-        "sha256" => format!("{:x}", Sha256::digest(encoded.as_bytes())),
-        "sha512" => format!("{:x}", Sha512::digest(encoded.as_bytes())),
-        "blake3" => blake3::hash(encoded.as_bytes()).to_hex().to_string(),
-        _ => return Err(format!("Unsupported hash algorithm: {algo}")),
-    };
+    let digest = compute_digest_hex(encoded.as_bytes(), algo)?;
     Ok(format!("{algo}:{digest}"))
+}
+
+fn compute_digest_hex(bytes: &[u8], algo: &str) -> Result<String, String> {
+    match algo {
+        "sha256" => Ok(format!("{:x}", Sha256::digest(bytes))),
+        "sha512" => Ok(format!("{:x}", Sha512::digest(bytes))),
+        "blake3" => Ok(blake3::hash(bytes).to_hex().to_string()),
+        _ => Err(format!("Unsupported hash algorithm: {algo}")),
+    }
 }
 
 fn canonical_json(value: &Value) -> String {

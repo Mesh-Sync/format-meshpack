@@ -194,21 +194,21 @@ The authoritative `pack_hash` MUST be distributed via a detached sidecar file:
   "hash_algo": "sha256",
   "pack_hash": "sha256:a1b2c3d4...",
   "computed_at": "2026-01-16T12:00:00Z",
-  "exclusions": ["mapping.db"],
   "signatures": []
 }
 ```
 
 **Generation sequence**:
 1. Create complete archive (manifest contains placeholder `pack_hash`)
-2. Compute hash of archive bytes
+2. Compute hash of the complete archive bytes
 3. Write sidecar file with computed hash
 
 **Verification sequence**:
 1. Read sidecar file
-2. Compute hash of archive bytes
-3. Compare to `sidecar.pack_hash`
-4. **MUST NOT** use `manifest.pack_hash` for verification (it's a reference only)
+2. Compare `pack_size_bytes` against the archive size
+3. Compute hash of the complete archive bytes
+4. Compare to `sidecar.pack_hash`
+5. **MUST NOT** use `manifest.pack_hash` for verification (it's a reference only)
 
 **Rationale**: Hash-in-file is impossible; sidecar solves chicken-and-egg problem.
 
@@ -252,8 +252,9 @@ Implementations SHOULD default to `sha256` for maximum compatibility.
 When embedding resources, implementations MUST:
 1. Create `resources/` folder in archive root
 2. Name files as `{hash}.{extension}` where:
-   - `{hash}` = Content hash **hex digits only** (no algorithm prefix) — algorithm is implicit from `manifest.hash_algo`. No colons in filenames for Windows compatibility.
-   - `{extension}` = Original file extension (lowercase)
+    - `{hash}` = Content hash **hex digits only** (no algorithm prefix) — algorithm is implicit from `manifest.hash_algo`. No colons in filenames for Windows compatibility.
+    - `{extension}` = Original file extension (lowercase)
+    - The final filename MUST be flat: no slashes, backslashes, drive letters, UNC prefixes, or `..` traversal segments.
 3. Include `resources/_README.md` documenting:
    - Hash algorithm used
    - File types included

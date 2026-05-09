@@ -9,12 +9,13 @@ import os
 import re
 import zipfile
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 
 __version__ = "{{ version }}"
 
 HASH_PATTERN = re.compile(r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$")
+RESOURCE_REF_PATTERN = re.compile(r"^([a-f0-9]{64}|[a-f0-9]{128})\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
 ALLOWED_COMPRESSION = {zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED}
 MAX_DECOMPRESSED_SIZE = 10 * 1024**3
 MAX_COMPRESSION_RATIO = 100
@@ -133,10 +134,149 @@ def _check_entry_path(path: str, shard_path: str, findings: List[ValidationFindi
         findings.append(_finding("ERROR", "ENT-005", f"UNC path in {shard_path}: {path}"))
 
 
+def _is_safe_resource_ref(resource_ref: str) -> bool:
+    return bool(RESOURCE_REF_PATTERN.match(resource_ref)) and "/" not in resource_ref and "\\" not in resource_ref
+
+
+def _check_resource_ref(
+    resource_ref: Any,
+    field_name: str,
+    shard_path: str,
+    entry_path: str,
+    findings: List[ValidationFinding],
+) -> None:
+    if resource_ref is None or resource_ref == "":
+        return
+    if not isinstance(resource_ref, str):
+        findings.append(_finding("ERROR", "RES-004", f"{field_name} for {shard_path}:{entry_path} must be a string"))
+        return
+    if ":" in resource_ref:
+        findings.append(_finding("WARNING", "RES-003", f"{field_name} contains ':' in {shard_path}:{entry_path}"))
+    if not _is_safe_resource_ref(resource_ref):
+        findings.append(_finding("ERROR", "RES-004", f"Unsafe or non-canonical {field_name} in {shard_path}:{entry_path}: {resource_ref}"))
+
+
+def _verify_signature_entries(signatures: List[Dict[str, Any]], pack_hash: str) -> List[ValidationFinding]:
+    findings: List[ValidationFinding] = []
+    try:
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.hazmat.primitives.asymmetric.padding import MGF1, PSS
+        from cryptography.hazmat.primitives.hashes import SHA256
+        from cryptography.hazmat.primitives.serialization import load_der_public_key
+    except ImportError:
+        return [_finding("WARNING", "SIG-001", "Signature verification requires the cryptography package")]
+
+    signed_data = pack_hash.encode("utf-8")
+    for index, signature_entry in enumerate(signatures):
+        signer = signature_entry.get("signer_id", f"signature[{index}]")
+        alg = signature_entry.get("alg", "")
+        public_key = signature_entry.get("public_key", "")
+        signature = signature_entry.get("signature", "")
+        if not alg or not public_key or not signature:
+            findings.append(_finding("ERROR", "SIG-002", f"{signer}: missing required field (alg/public_key/signature)"))
+            continue
+
+        try:
+            public_key_bytes = base64.b64decode(public_key)
+            signature_bytes = base64.b64decode(signature)
+        except Exception as exc:
+            findings.append(_finding("ERROR", "SIG-003", f"{signer}: invalid base64 encoding — {exc}"))
+            continue
+
+        if alg == "ed25519":
+            try:
+                key_bytes = public_key_bytes[-32:] if len(public_key_bytes) != 32 else public_key_bytes
+                Ed25519PublicKey.from_public_bytes(key_bytes).verify(signature_bytes, signed_data)
+                findings.append(_finding("INFO", "SIG-010", f"{signer}: Ed25519 signature verified successfully"))
+            except Exception as exc:
+                findings.append(_finding("ERROR", "SIG-004", f"{signer}: Ed25519 signature verification failed — {exc}"))
+        elif alg == "rsa-pss-sha256":
+            try:
+                key = load_der_public_key(public_key_bytes)
+                key.verify(signature_bytes, signed_data, PSS(mgf=MGF1(SHA256()), salt_length=PSS.MAX_LENGTH), SHA256())
+                findings.append(_finding("INFO", "SIG-010", f"{signer}: RSA-PSS-SHA256 signature verified successfully"))
+            except Exception as exc:
+                findings.append(_finding("ERROR", "SIG-004", f"{signer}: RSA-PSS-SHA256 signature verification failed — {exc}"))
+        else:
+            findings.append(_finding("INFO", "SIG-005", f"{signer}: unsupported algorithm '{alg}' — skipped"))
+
+    return findings
+
+
+def _check_sidecar(
+    file_path: str,
+    manifest: Dict[str, Any],
+    findings: List[ValidationFinding],
+    sidecar_path: Optional[str] = None,
+    verify_signatures: bool = False,
+) -> None:
+    if sidecar_path is None:
+        auto_path = file_path + ".integrity"
+        if os.path.exists(auto_path):
+            sidecar_path = auto_path
+
+    if sidecar_path is None:
+        findings.append(_finding("INFO", "SDC-001", "No .meshpack.integrity sidecar found; skipping pack-level hash verification."))
+        return
+
+    try:
+        with open(sidecar_path, "r", encoding="utf-8") as sidecar_file:
+            sidecar_data = json.load(sidecar_file)
+    except (json.JSONDecodeError, OSError) as exc:
+        findings.append(_finding("ERROR", "SDC-002", f"Failed to load sidecar: {exc}"))
+        return
+
+    try:
+        Sidecar(**sidecar_data)
+    except ValidationError as exc:
+        findings.append(_finding("ERROR", "SCH-001", f"Sidecar schema validation failed: {exc}"))
+
+    pack_name = sidecar_data.get("pack_name")
+    if pack_name and pack_name != os.path.basename(file_path):
+        findings.append(_finding("ERROR", "SDC-006", f"Sidecar pack_name mismatch: sidecar expects {pack_name}, archive is {os.path.basename(file_path)}"))
+
+    pack_size_bytes = sidecar_data.get("pack_size_bytes")
+    if isinstance(pack_size_bytes, int):
+        actual_size = os.path.getsize(file_path)
+        if pack_size_bytes != actual_size:
+            findings.append(_finding("ERROR", "SDC-007", f"Sidecar pack_size_bytes mismatch: sidecar expects {pack_size_bytes}, archive is {actual_size}"))
+
+    sidecar_algo = sidecar_data.get("hash_algo", "")
+    sidecar_hash = sidecar_data.get("pack_hash", "")
+    manifest_algo = manifest.get("hash_algo", "")
+    if sidecar_algo and manifest_algo and sidecar_algo != manifest_algo:
+        findings.append(_finding("ERROR", "SDC-008", f"Sidecar hash_algo mismatch: sidecar uses {sidecar_algo}, manifest uses {manifest_algo}"))
+    if not sidecar_algo or not sidecar_hash:
+        findings.append(_finding("WARNING", "SDC-003", "Sidecar missing hash_algo or pack_hash"))
+        return
+
+    try:
+        with open(file_path, "rb") as archive_file:
+            digest = _compute_digest(archive_file.read(), sidecar_algo)
+    except (OSError, ValueError) as exc:
+        findings.append(_finding("WARNING", "SDC-004", str(exc)))
+        return
+
+    actual = f"{sidecar_algo}:{digest}" if ":" in sidecar_hash else digest
+    if actual != sidecar_hash:
+        findings.append(_finding("ERROR", "SDC-005", f"Pack hash mismatch: sidecar expects {sidecar_hash}, computed {actual}"))
+    else:
+        findings.append(_finding("INFO", "SDC-010", "Pack hash verified successfully via sidecar."))
+
+    signatures = sidecar_data.get("signatures")
+    if isinstance(signatures, list) and signatures and verify_signatures:
+        findings.extend(_verify_signature_entries(signatures, sidecar_hash))
+    elif isinstance(signatures, list) and signatures:
+        findings.append(_finding("INFO", "SDC-011", f"Sidecar contains {len(signatures)} signature(s). Enable signature verification to check them."))
+
+
 def validate_meshpack(
     file_path: str,
     max_size: int = MAX_DECOMPRESSED_SIZE,
     max_ratio: int = MAX_COMPRESSION_RATIO,
+    sidecar_path: Optional[str] = None,
+    verify_signatures: bool = False,
 ) -> ValidationResult:
     findings: List[ValidationFinding] = []
 
@@ -233,10 +373,15 @@ def validate_meshpack(
                 resource_ref = entry.get("resource_ref")
                 if resource_ref and not entry.get("resource_hash"):
                     findings.append(_finding("WARNING", "RES-001", f"{shard_path}:{entry_path} has resource_ref but missing resource_hash"))
+                _check_resource_ref(resource_ref, "resource_ref", shard_path, entry_path, findings)
                 if resource_ref and f"resources/{resource_ref}" not in names_set:
                     findings.append(_finding("ERROR", "RES-002", f"Missing embedded resource: resources/{resource_ref}"))
-                if resource_ref and ":" in resource_ref:
-                    findings.append(_finding("WARNING", "RES-003", f"resource_ref contains ':' in {shard_path}:{entry_path}"))
+                preview_ref = entry.get("preview_ref")
+                _check_resource_ref(preview_ref, "preview_ref", shard_path, entry_path, findings)
+                if preview_ref and f"resources/{preview_ref}" not in names_set:
+                    findings.append(_finding("ERROR", "RES-002", f"Missing embedded resource: resources/{preview_ref}"))
+
+            _check_sidecar(file_path, manifest, findings, sidecar_path, verify_signatures)
 
     return ValidationResult(findings=findings)
 
@@ -295,6 +440,8 @@ class MeshPackReader:
     def read_resource(self, file_entry: FileEntry) -> Optional[bytes]:
         if not file_entry.resource_ref:
             return None
+        if not _is_safe_resource_ref(file_entry.resource_ref):
+            return None
         try:
             with self._zip.open(f"resources/{file_entry.resource_ref}") as resource_file:
                 return resource_file.read()
@@ -306,6 +453,9 @@ class MeshPackReader:
         missing_resources = []
         names = set(self._zip.namelist())
         for entry in self._files.values():
+            if entry.resource_ref and not _is_safe_resource_ref(entry.resource_ref):
+                missing_resources.append(entry.path)
+                continue
             if entry.resource_ref and f"resources/{entry.resource_ref}" not in names:
                 missing_resources.append(entry.path)
         return {"missing_resources": missing_resources}

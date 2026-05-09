@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import tempfile
+import hashlib
 
 import pytest
 
@@ -19,6 +20,28 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from tools.meshpack_validate import validate, Severity, verify_signature_entries  # noqa: E402
 from .conftest import MeshPackBuilder  # noqa: E402
+
+
+def _sidecar_for(path: str, pack_hash: str | None = None, signatures: list[dict] | None = None) -> dict:
+    with open(path, "rb") as archive_file:
+        digest = hashlib.sha256(archive_file.read()).hexdigest()
+    sidecar = {
+        "pack_name": os.path.basename(path),
+        "pack_size_bytes": os.path.getsize(path),
+        "hash_algo": "sha256",
+        "pack_hash": pack_hash or f"sha256:{digest}",
+        "computed_at": "2026-01-01T00:00:00Z",
+    }
+    if signatures is not None:
+        sidecar["signatures"] = signatures
+    return sidecar
+
+
+def _write_sidecar(path: str, sidecar: dict) -> str:
+    sidecar_path = path + ".integrity"
+    with open(sidecar_path, "w", encoding="utf-8") as sidecar_file:
+        json.dump(sidecar, sidecar_file)
+    return sidecar_path
 
 
 # ---------------------------------------------------------------------------
@@ -89,28 +112,17 @@ class TestImportPolicy:
 class TestSidecarVerification:
     def test_sidecar_detected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
         """Validator should detect .meshpack.integrity sidecar file."""
-        import hashlib
-
         path = pack_builder.add_shard(
             "part-00001", [minimal_valid_entry], entries_count=1
         ).build_to_file()
 
-        # Create matching sidecar
-        with open(path, "rb") as f:
-            digest = hashlib.sha256(f.read()).hexdigest()
-
-        sidecar_path = path + ".integrity"
-        sidecar = {
-            "format_version": "1.0.0",
-            "hash_algo": "sha256",
-            "pack_hash": f"sha256:{digest}",
-        }
-        with open(sidecar_path, "w") as f:
-            json.dump(sidecar, f)
+        sidecar_path = _write_sidecar(path, _sidecar_for(path))
 
         try:
-            findings = validate(path)
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
             infos = [f for f in findings if f.severity == Severity.INFO]
+            assert not errors, f"Unexpected strict-mode errors: {errors}"
             assert any("SDC-010" in f.code for f in infos), "Sidecar verification should succeed"
         finally:
             os.unlink(path)
@@ -122,19 +134,49 @@ class TestSidecarVerification:
             "part-00001", [minimal_valid_entry], entries_count=1
         ).build_to_file()
 
-        sidecar_path = path + ".integrity"
-        sidecar = {
-            "format_version": "1.0.0",
-            "hash_algo": "sha256",
-            "pack_hash": "sha256:" + "00" * 32,
-        }
-        with open(sidecar_path, "w") as f:
-            json.dump(sidecar, f)
+        sidecar_path = _write_sidecar(path, _sidecar_for(path, pack_hash="sha256:" + "00" * 32))
 
         try:
-            findings = validate(path)
+            findings = validate(path, schema_mode="strict")
             errors = [f for f in findings if f.severity == Severity.ERROR]
             assert any("SDC-005" in f.code for f in errors)
+        finally:
+            os.unlink(path)
+            os.unlink(sidecar_path)
+
+    def test_sidecar_size_mismatch_error(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """pack_size_bytes must match the archive before hash/signature trust."""
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+
+        sidecar = _sidecar_for(path)
+        sidecar["pack_size_bytes"] += 1
+        sidecar_path = _write_sidecar(path, sidecar)
+
+        try:
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SDC-007" for f in errors)
+        finally:
+            os.unlink(path)
+            os.unlink(sidecar_path)
+
+    def test_sidecar_schema_errors_are_visible(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """A hash match cannot hide an invalid sidecar document."""
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+
+        sidecar = _sidecar_for(path)
+        del sidecar["pack_name"]
+        sidecar_path = _write_sidecar(path, sidecar)
+
+        try:
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SCH-001" for f in errors)
+            assert any(f.code == "SDC-010" for f in findings)
         finally:
             os.unlink(path)
             os.unlink(sidecar_path)
@@ -158,6 +200,33 @@ class TestSignatureVerificationCrypto:
         private_key = Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
         pub_bytes = public_key.public_bytes_raw()
+
+        pack_hash = "sha256:" + "ab" * 32
+        sig_bytes = private_key.sign(pack_hash.encode("utf-8"))
+
+        signatures = [{
+            "alg": "ed25519",
+            "public_key": base64.b64encode(pub_bytes).decode(),
+            "signature": base64.b64encode(sig_bytes).decode(),
+            "signer_id": "test-signer",
+        }]
+
+        findings = verify_signature_entries(signatures, pack_hash)
+        infos = [f for f in findings if f.code == "SIG-010"]
+        assert infos, f"Expected SIG-010 success, got: {findings}"
+
+    def test_ed25519_spki_public_key_signature(self) -> None:
+        """A valid Ed25519 signature may use SPKI/DER public key bytes."""
+        import base64
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        pub_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
 
         pack_hash = "sha256:" + "ab" * 32
         sig_bytes = private_key.sign(pack_hash.encode("utf-8"))
@@ -213,3 +282,33 @@ class TestSignatureVerificationCrypto:
         findings = verify_signature_entries(signatures, "sha256:" + "00" * 32)
         infos = [f for f in findings if f.code == "SIG-005"]
         assert infos
+
+    def test_validate_verifies_sidecar_signatures(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """validate(..., verify_sigs=True) must verify authoritative sidecar signatures."""
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        path = pack_builder.add_shard(
+            "part-00001", [minimal_valid_entry], entries_count=1
+        ).build_to_file()
+
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        sidecar = _sidecar_for(path)
+        signature = private_key.sign(sidecar["pack_hash"].encode("utf-8"))
+        sidecar["signatures"] = [{
+            "alg": "ed25519",
+            "public_key": base64.b64encode(public_key.public_bytes_raw()).decode(),
+            "signature": base64.b64encode(signature).decode(),
+            "signer_id": "test-signer",
+        }]
+        sidecar_path = _write_sidecar(path, sidecar)
+
+        try:
+            findings = validate(path, verify_sigs=True, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert not errors, f"Unexpected strict-mode errors: {errors}"
+            assert any(f.code == "SIG-010" for f in findings)
+        finally:
+            os.unlink(path)
+            os.unlink(sidecar_path)

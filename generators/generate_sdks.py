@@ -510,6 +510,8 @@ serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
 sha2 = "0.10"
 blake3 = "1.5"
+base64 = "0.22"
+ed25519-dalek = "2.1"
 chrono = {{ version = "0.4", features = ["serde"] }}
 zip = "0.6"
 typed-builder = "0.18"
@@ -536,7 +538,7 @@ typed-builder = "0.18"
             "lint": "tsc --noEmit",
             "test": "npm run build"
         },
-        "dependencies": {"jszip": "^3.10.1"},
+        "dependencies": {"@noble/hashes": "^1.7.1", "jszip": "^3.10.1"},
         "devDependencies": {"@types/node": "^20.0.0", "typescript": "^5.0.0"},
     })
 
@@ -604,6 +606,11 @@ typed-builder = "0.18"
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
             <version>2.17.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.79</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

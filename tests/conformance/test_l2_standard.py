@@ -383,6 +383,106 @@ class TestResourceRefFormat:
         finally:
             os.unlink(path)
 
+    @pytest.mark.parametrize(
+        "resource_ref",
+        [
+            "../secret.png",
+            "nested/thumb.png",
+            "C:\\Users\\thumb.png",
+            "\\\\server\\share\\thumb.png",
+            "not-a-hash.png",
+        ],
+    )
+    def test_unsafe_resource_ref_rejected(
+        self, pack_builder: MeshPackBuilder, resource_ref: str
+    ) -> None:
+        """resource_ref is a resource filename, not an arbitrary ZIP path."""
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": "sha256:aabbccdd" + "00" * 28,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+            "resource_ref": resource_ref,
+            "resource_hash": "sha256:aabbccdd" + "00" * 28,
+        }
+        path = pack_builder.add_shard("part-00001", [entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any("RES-004" in f.code for f in errors)
+        finally:
+            os.unlink(path)
+
+
+class TestSchemaMode:
+    def test_unknown_manifest_fields_warn_in_compat_mode(self, pack_builder: MeshPackBuilder) -> None:
+        pack_builder.set_manifest_field("future_field", True)
+        path = pack_builder.add_shard("part-00001", [], entries_count=0).build_to_file()
+        try:
+            findings = validate(path, schema_mode="compat")
+            warnings = [f for f in findings if f.severity == Severity.WARNING]
+            assert any(f.code == "SCH-002" for f in warnings)
+        finally:
+            os.unlink(path)
+
+    def test_unknown_manifest_fields_error_in_strict_mode(self, pack_builder: MeshPackBuilder) -> None:
+        pack_builder.set_manifest_field("future_field", True)
+        path = pack_builder.add_shard("part-00001", [], entries_count=0).build_to_file()
+        try:
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SCH-002" for f in errors)
+        finally:
+            os.unlink(path)
+
+
+class TestOfficialExtensionValidation:
+    def test_valid_thumbnail_v2_extension_accepted(self, pack_builder: MeshPackBuilder) -> None:
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": "sha256:" + "aa" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+            "extensions": {
+                "meshsync_thumbnails": {
+                    "v2": {
+                        "static": "a" * 64 + ".png",
+                    }
+                }
+            },
+        }
+        path = pack_builder.add_shard("part-00001", [entry], entries_count=1).build_to_file()
+        try:
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert not errors
+        finally:
+            os.unlink(path)
+
+    def test_invalid_official_extension_rejected(self, pack_builder: MeshPackBuilder) -> None:
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": "sha256:" + "aa" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+            "extensions": {
+                "meshsync_thumbnails": {
+                    "v2": {
+                        "static": "sha256:" + "aa" * 32 + ".png",
+                    }
+                }
+            },
+        }
+        path = pack_builder.add_shard("part-00001", [entry], entries_count=1).build_to_file()
+        try:
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SCH-001" for f in errors)
+        finally:
+            os.unlink(path)
 
 # ---------------------------------------------------------------------------
 # BLAKE3 hash algorithm support

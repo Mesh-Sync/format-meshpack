@@ -91,7 +91,7 @@ shard-file        = "index/part-" 5DIGIT ".json"  ; 1-based, zero-padded
 resources-dir     = "resources/" readme-file *resource-file
 resource-file     = "resources/" hex-hash "." extension
 readme-file       = "_README.md"
-mapping-db        = "mapping.db"            ; OPTIONAL, EXCLUDED from hashing
+mapping-db        = "mapping.db"            ; OPTIONAL cache, included in archive hash if present
 ```
 
 Expanded layout:
@@ -109,20 +109,18 @@ root/
 │   ├── _README.md
 │   ├── <hex-hash>.jpg  # Named WITHOUT algo prefix for Windows compat
 │   └── ...
-└── mapping.db          # (Optional, EXCLUDED from hashing) SQLite cache
+└── mapping.db          # (Optional) SQLite cache; included in whole-archive hashing if present
 ```
 
 Each directory contains a `_README.md` file (underscore prefix forces sort-first ordering) describing its purpose, ensuring human readability when extracted.
 
 ### 3.1 Note on `mapping.db`
 
-The optional `mapping.db` SQLite file is a **local acceleration cache** for consumers. It is explicitly **EXCLUDED from integrity verification** because:
-- SQLite files are non-deterministic (page ordering, vacuum behavior varies by platform)
-- Two generators producing identical logical content will create different binary files
+The optional `mapping.db` SQLite file is a **local acceleration cache** for consumers. Because MeshPack 2.0 sidecars hash the complete archive bytes, `mapping.db` is included in `pack_hash` if present. Producers that need reproducible package bytes SHOULD omit `mapping.db` and let consumers regenerate it from shards.
 
 **Rules**:
 - Generators MAY include `mapping.db` for convenience
-- Verifiers MUST NOT include `mapping.db` in `pack_hash` computation
+- Verifiers MUST include every archive byte in `pack_hash` computation
 - Consumers SHOULD regenerate `mapping.db` from shards if integrity is critical
 
 > **Implementation status**: As of v1.1, no standard tooling generates or
@@ -304,7 +302,7 @@ To handle libraries with hundreds of thousands of files without loading a monoli
 *   **`units`**: Measurement units (`mm` | `cm` | `m` | `in` | `ft` | `unitless`).
 *   **`up_axis`**: Source model's up-axis orientation (`+Z` | `-Z` | `+Y` | `-Y`).
 *   **`bounding_box`**: Axis-aligned bounding box in the **source** file's coordinate system. Units are inherited from the sibling `units` field.
-*   **`resource_ref`**: Reference to embedded file in `resources/` folder. Format: `{hex_hash}.{ext}` (**no algorithm prefix** — the algorithm is implicit from `manifest.hash_algo`). No colons in filenames for Windows compatibility.
+*   **`resource_ref`**: Reference to embedded file in `resources/` folder. Format: `{hex_hash}.{ext}` (**no algorithm prefix** — the algorithm is implicit from `manifest.hash_algo`). This is a filename only, not a path; it MUST NOT contain slashes, backslashes, colons, drive letters, UNC prefixes, or `..` traversal segments.
 *   **`resource_hash` / `resource_size_bytes`**: Integrity for embedded blobs. `hash` refers to the **original file**; `resource_hash` refers to the **embedded blob**. These SHOULD be identical unless the resource is a derivative (e.g., compressed thumbnail).
 *   **`preview_ref`**: Reference to preview thumbnail in `resources/` (format: `{hex_hash}.{ext}`).
 *   **`extensions`**: Allows tagging files with extra data. Keys MUST use namespace prefixes (see EXTENSIONS.md).
@@ -317,7 +315,7 @@ If configured, the `.meshpack` may contain actual file content, not just metadat
 
 ### 6.1 Flattening Strategy
 *   All files in `resources/` are **flattened** (no subdirectories).
-*   **Naming Convention**: `<HEX-HASH>.<EXTENSION>` (e.g., `e3b0c44298fc1c149...855.jpg`). Note: **NO algorithm prefix** in the filename — the algorithm is implicit from `manifest.hash_algo`. This avoids colons in filenames (illegal on Windows).
+*   **Naming Convention**: `<HEX-HASH>.<EXTENSION>` (e.g., `e3b0c44298fc1c149...855.jpg`). Note: **NO algorithm prefix** in the filename — the algorithm is implicit from `manifest.hash_algo`. Resource names are flat filenames only; path separators and traversal segments are invalid.
 *   **Linking**: The `FileEntry` links to this file via the `resource_ref` field.
 
 ### 6.2 Usage Rules
@@ -368,7 +366,6 @@ Computing a hash of an archive and storing it *inside* the archive is logically 
   "hash_algo": "sha256",
   "pack_hash": "sha256:a1b2c3d4...",
   "computed_at": "2026-01-16T12:00:00Z",
-  "exclusions": ["mapping.db"],
   "signatures": [
     {
       "alg": "ed25519",
@@ -385,17 +382,16 @@ Computing a hash of an archive and storing it *inside* the archive is logically 
 
 1. Read sidecar file (`library.meshpack.integrity`)
 2. Quick sanity: compare `pack_size_bytes` against actual archive size
-3. Compute hash of `library.meshpack` bytes, **excluding** entries listed in `exclusions` (e.g., `mapping.db`)
+3. Compute hash of the complete `library.meshpack` archive bytes
 4. Compare computed hash against `pack_hash` in the **sidecar** (NOT the embedded manifest value)
 5. If signatures present, verify each against `pack_hash`
 6. For each shard: compute hash of canonical JSON of sorted `entries` array, compare against `shard_list[].entries_hash`
 
 **IMPORTANT**: Verifiers MUST use the sidecar for `pack_hash` verification. The `manifest.pack_hash` value is informational only.
 
-### 8.4 Hash Exclusions
+### 8.4 Whole-Archive Hashing
 
-The following MUST be excluded from `pack_hash` computation:
-- `mapping.db` (non-deterministic SQLite)
+MeshPack 2.0 uses whole-archive hashing for sidecars: every byte of the `.meshpack` / `.mpack` file is part of `pack_hash`. Optional acceleration files such as `mapping.db` are therefore integrity-protected if present, but they may make reproducible builds harder. Producers SHOULD omit non-deterministic cache files from public release artifacts.
 
 ### 8.5 Shard Hash Computation (Canonical JSON)
 

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/1.1/validation-finding.schema.json",
+  "$id": "https://meshsync.net/schemas/meshpack/2.0/validation-finding.schema.json",
   "title": "MeshPack Validation Finding",
   "description": "Language-neutral validation finding emitted by reference and SDK validators.",
   "type": "object",

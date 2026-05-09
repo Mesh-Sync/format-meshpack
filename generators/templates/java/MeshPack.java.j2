@@ -4,11 +4,21 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.PSSParameterSpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.Iterator;
@@ -27,9 +37,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.bouncycastle.crypto.digests.Blake3Digest;
 
 public final class MeshPack {
   public static final String VERSION = "{{ version }}";
+  private static final String RESOURCE_REF_PATTERN = "^([a-f0-9]{64}|[a-f0-9]{128})\\.[A-Za-z0-9][A-Za-z0-9._-]{0,31}$";
   private static final ObjectMapper MAPPER = new ObjectMapper()
       .registerModule(new JavaTimeModule())
       .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -117,6 +129,10 @@ Object
   }
 
   public static ValidationResult validate(Path path) {
+    return validate(path, false);
+  }
+
+  public static ValidationResult validate(Path path, boolean verifySignatures) {
     List<ValidationFinding> findings = new ArrayList<>();
     try (ZipFile archive = new ZipFile(path.toFile())) {
       List<? extends ZipEntry> entries = archive.stream().toList();
@@ -207,14 +223,17 @@ Object
           if (entry.resource_ref() != null && entry.resource_hash() == null) {
             findings.add(finding("WARNING", "RES-001", shardPath + ":" + entry.path() + " has resource_ref but missing resource_hash"));
           }
+          validateResourceRef(entry.resource_ref(), "resource_ref", shardPath, entry.path(), findings);
           if (entry.resource_ref() != null && !names.contains("resources/" + entry.resource_ref())) {
             findings.add(finding("ERROR", "RES-002", "Missing embedded resource: resources/" + entry.resource_ref()));
           }
-          if (entry.resource_ref() != null && entry.resource_ref().contains(":")) {
-            findings.add(finding("WARNING", "RES-003", "resource_ref contains ':' in " + shardPath + ":" + entry.path()));
+          validateResourceRef(entry.preview_ref(), "preview_ref", shardPath, entry.path(), findings);
+          if (entry.preview_ref() != null && !names.contains("resources/" + entry.preview_ref())) {
+            findings.add(finding("ERROR", "RES-002", "Missing embedded resource: resources/" + entry.preview_ref()));
           }
         }
       }
+      verifySidecar(path, manifest, verifySignatures, findings);
     } catch (IOException exception) {
       findings.add(finding("ERROR", "ARC-001", "Cannot open archive: " + exception.getMessage()));
     }
@@ -248,6 +267,152 @@ Object
     return value.matches("^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$");
   }
 
+  private static boolean isSafeResourceRef(String value) {
+    return value != null && value.matches(RESOURCE_REF_PATTERN) && !value.contains("/") && !value.contains("\\") && !value.contains(":");
+  }
+
+  private static void validateResourceRef(String resourceRef, String fieldName, String shardPath, String entryPath, List<ValidationFinding> findings) {
+    if (resourceRef == null || resourceRef.isBlank()) {
+      return;
+    }
+    if (resourceRef.contains(":")) {
+      findings.add(finding("WARNING", "RES-003", fieldName + " contains ':' in " + shardPath + ":" + entryPath));
+    }
+    if (!isSafeResourceRef(resourceRef)) {
+      findings.add(finding("ERROR", "RES-004", "Unsafe or non-canonical " + fieldName + " in " + shardPath + ":" + entryPath + ": " + resourceRef));
+    }
+  }
+
+  private static void verifySidecar(Path path, Manifest manifest, boolean verifySignatures, List<ValidationFinding> findings) {
+    Path sidecarPath = Path.of(path.toString() + ".integrity");
+    if (!Files.exists(sidecarPath)) {
+      findings.add(finding("INFO", "SDC-001", "No .meshpack.integrity sidecar found; skipping pack-level hash verification."));
+      return;
+    }
+
+    Sidecar sidecar;
+    try {
+      sidecar = MAPPER.readValue(Files.readString(sidecarPath), Sidecar.class);
+    } catch (IOException exception) {
+      findings.add(finding("ERROR", "SDC-002", "Failed to load sidecar: " + exception.getMessage()));
+      return;
+    }
+
+    Path fileName = path.getFileName();
+    if (fileName != null && sidecar.pack_name() != null && !sidecar.pack_name().equals(fileName.toString())) {
+      findings.add(finding("ERROR", "SDC-006", "Sidecar pack_name mismatch: sidecar expects " + sidecar.pack_name() + ", archive is " + fileName));
+    }
+
+    try {
+      long actualSize = Files.size(path);
+      if (sidecar.pack_size_bytes() != null && sidecar.pack_size_bytes() != actualSize) {
+        findings.add(finding("ERROR", "SDC-007", "Sidecar pack_size_bytes mismatch: sidecar expects " + sidecar.pack_size_bytes() + ", archive is " + actualSize));
+      }
+    } catch (IOException exception) {
+      findings.add(finding("WARNING", "SDC-004", "Failed to read archive metadata: " + exception.getMessage()));
+    }
+
+    if (sidecar.hash_algo() != null && manifest.hash_algo() != null && !sidecar.hash_algo().equals(manifest.hash_algo())) {
+      findings.add(finding("ERROR", "SDC-008", "Sidecar hash_algo mismatch: sidecar uses " + sidecar.hash_algo() + ", manifest uses " + manifest.hash_algo()));
+    }
+    if (sidecar.hash_algo() == null || sidecar.pack_hash() == null) {
+      findings.add(finding("WARNING", "SDC-003", "Sidecar missing hash_algo or pack_hash"));
+      return;
+    }
+
+    try {
+      String digest = HexFormat.of().formatHex(digest(Files.readAllBytes(path), sidecar.hash_algo()));
+      String actual = sidecar.pack_hash().contains(":") ? sidecar.hash_algo() + ":" + digest : digest;
+      if (!actual.equals(sidecar.pack_hash())) {
+        findings.add(finding("ERROR", "SDC-005", "Pack hash mismatch: sidecar expects " + sidecar.pack_hash() + ", computed " + actual));
+      } else {
+        findings.add(finding("INFO", "SDC-010", "Pack hash verified successfully via sidecar."));
+      }
+    } catch (IOException | IllegalArgumentException exception) {
+      findings.add(finding("WARNING", "SDC-004", exception.getMessage()));
+      return;
+    }
+
+    if (sidecar.signatures() != null && !sidecar.signatures().isEmpty() && verifySignatures) {
+      findings.addAll(verifySignatureEntries(sidecar.signatures(), sidecar.pack_hash()));
+    } else if (sidecar.signatures() != null && !sidecar.signatures().isEmpty()) {
+      findings.add(finding("INFO", "SDC-011", "Sidecar contains " + sidecar.signatures().size() + " signature(s). Enable signature verification to check them."));
+    }
+  }
+
+  private static List<ValidationFinding> verifySignatureEntries(List<SignatureEntry> signatures, String packHash) {
+    List<ValidationFinding> findings = new ArrayList<>();
+    byte[] signedData = packHash.getBytes(StandardCharsets.UTF_8);
+    for (int index = 0; index < signatures.size(); index++) {
+      SignatureEntry signatureEntry = signatures.get(index);
+      String signer = signatureEntry.signer_id() == null || signatureEntry.signer_id().isBlank() ? "signature[" + index + "]" : signatureEntry.signer_id();
+      if (signatureEntry.alg() == null || signatureEntry.public_key() == null || signatureEntry.signature() == null) {
+        findings.add(finding("ERROR", "SIG-002", signer + ": missing required field (alg/public_key/signature)"));
+        continue;
+      }
+
+      byte[] publicKeyBytes;
+      byte[] signatureBytes;
+      try {
+        publicKeyBytes = Base64.getDecoder().decode(signatureEntry.public_key());
+        signatureBytes = Base64.getDecoder().decode(signatureEntry.signature());
+      } catch (IllegalArgumentException exception) {
+        findings.add(finding("ERROR", "SIG-003", signer + ": invalid base64 encoding - " + exception.getMessage()));
+        continue;
+      }
+
+      try {
+        if ("ed25519".equals(signatureEntry.alg())) {
+          Signature verifier = Signature.getInstance("Ed25519");
+          verifier.initVerify(ed25519PublicKey(publicKeyBytes));
+          verifier.update(signedData);
+          if (verifier.verify(signatureBytes)) {
+            findings.add(finding("INFO", "SIG-010", signer + ": Ed25519 signature verified successfully"));
+          } else {
+            findings.add(finding("ERROR", "SIG-004", signer + ": Ed25519 signature verification failed"));
+          }
+        } else if ("rsa-pss-sha256".equals(signatureEntry.alg())) {
+          PublicKey publicKey = KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(publicKeyBytes));
+          Signature verifier = Signature.getInstance("RSASSA-PSS");
+          int saltLength = 32;
+          if (publicKey instanceof RSAPublicKey rsaPublicKey) {
+            saltLength = Math.max(0, ((rsaPublicKey.getModulus().bitLength() + 7) / 8) - 32 - 2);
+          }
+          verifier.setParameter(new PSSParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, saltLength, 1));
+          verifier.initVerify(publicKey);
+          verifier.update(signedData);
+          if (verifier.verify(signatureBytes)) {
+            findings.add(finding("INFO", "SIG-010", signer + ": RSA-PSS-SHA256 signature verified successfully"));
+          } else {
+            findings.add(finding("ERROR", "SIG-004", signer + ": RSA-PSS-SHA256 signature verification failed"));
+          }
+        } else {
+          findings.add(finding("INFO", "SIG-005", signer + ": unsupported algorithm '" + signatureEntry.alg() + "' - skipped"));
+        }
+      } catch (Exception exception) {
+        findings.add(finding("ERROR", "SIG-004", signer + ": " + signatureEntry.alg() + " signature verification failed - " + exception.getMessage()));
+      }
+    }
+    return findings;
+  }
+
+  private static PublicKey ed25519PublicKey(byte[] publicKeyBytes) throws Exception {
+    byte[] spkiBytes = publicKeyBytes;
+    if (publicKeyBytes.length == 32) {
+      byte[] prefix = HexFormat.of().parseHex("302a300506032b6570032100");
+      spkiBytes = new byte[prefix.length + publicKeyBytes.length];
+      System.arraycopy(prefix, 0, spkiBytes, 0, prefix.length);
+      System.arraycopy(publicKeyBytes, 0, spkiBytes, prefix.length, publicKeyBytes.length);
+    } else if (publicKeyBytes.length > 32 && publicKeyBytes.length != 44) {
+      byte[] prefix = HexFormat.of().parseHex("302a300506032b6570032100");
+      byte[] rawKey = Arrays.copyOfRange(publicKeyBytes, publicKeyBytes.length - 32, publicKeyBytes.length);
+      spkiBytes = new byte[prefix.length + rawKey.length];
+      System.arraycopy(prefix, 0, spkiBytes, 0, prefix.length);
+      System.arraycopy(rawKey, 0, spkiBytes, prefix.length, rawKey.length);
+    }
+    return KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(spkiBytes));
+  }
+
   private static String computeEntriesHash(String shardJson, String algo) {
     try {
       JsonNode entries = MAPPER.readTree(shardJson).get("entries");
@@ -267,12 +432,20 @@ Object
       return switch (algo) {
         case "sha256" -> MessageDigest.getInstance("SHA-256").digest(bytes);
         case "sha512" -> MessageDigest.getInstance("SHA-512").digest(bytes);
-        case "blake3" -> throw new IllegalArgumentException("BLAKE3 hashing is not available in the Java SDK runtime");
+        case "blake3" -> blake3(bytes);
         default -> throw new IllegalArgumentException("Unsupported hash algorithm: " + algo);
       };
     } catch (NoSuchAlgorithmException exception) {
       throw new IllegalArgumentException(exception.getMessage(), exception);
     }
+  }
+
+  private static byte[] blake3(byte[] bytes) {
+    Blake3Digest digest = new Blake3Digest(256);
+    digest.update(bytes, 0, bytes.length);
+    byte[] output = new byte[digest.getDigestSize()];
+    digest.doFinal(output, 0);
+    return output;
   }
 
   private static String canonicalJson(JsonNode node) {
@@ -358,6 +531,9 @@ Object
 
     public Optional<byte[]> readResource(String resourceRef) throws IOException {
       if (resourceRef == null || resourceRef.isBlank()) {
+        return Optional.empty();
+      }
+      if (!isSafeResourceRef(resourceRef)) {
         return Optional.empty();
       }
       ZipEntry entry = archive.getEntry("resources/" + resourceRef);

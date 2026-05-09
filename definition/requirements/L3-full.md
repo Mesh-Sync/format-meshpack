@@ -604,13 +604,13 @@ When `worker-thumbnail-generation` outputs are embedded:
 ```json
 {
   "path": "models/dragon.stl",
-  "preview_ref": "sha256:abc123...def.jpg",
+  "preview_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg",
   "extensions": {
     "meshsync_thumbnails": {
-      "v1": {
-        "static": "sha256:abc123...def.jpg",
-        "animated_360": "sha256:ghi789...jkl.mp4",
-        "glb_preview": "sha256:mno012...pqr.glb"
+      "v2": {
+        "static": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg",
+        "animated_360": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.mp4",
+        "glb_preview": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.glb"
       }
     }
   }
