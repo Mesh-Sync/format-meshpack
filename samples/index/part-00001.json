@@ -1,6 +1,6 @@
 {
   "shard_id": "part-00001",
-  "format_version": "1.0.0",
+  "format_version": "2.0.0",
   "entries_count": 17,
   "entries_hash": "sha256:645378423681e8a1b4d5fc37067ea66f6ae81cf27f2ace629c036721c177cf40",
   "entries": [

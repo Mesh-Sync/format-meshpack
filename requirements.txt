@@ -10,3 +10,4 @@ types-python-dateutil
 black
 flake8
 blake3  # optional: BLAKE3 hash support
+cryptography  # Ed25519 and RSA-PSS signature verification tests

@@ -1,0 +1,8 @@
+{
+  "pack_name": "test-workspace.mpack",
+  "pack_size_bytes": 2533,
+  "hash_algo": "sha256",
+  "pack_hash": "sha256:196bd1f2fad939e2e3bf7274efa9f7066e836d03d5ab12cdbfada2736872c141",
+  "computed_at": "2026-05-09T00:00:00Z",
+  "signatures": []
+}

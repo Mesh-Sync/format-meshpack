@@ -59,6 +59,6 @@ Pack-level sidecar and signature checks remain fully authoritative in the Python
 
 ## Sidecar Hashes and Signatures
 
-The sidecar `pack_hash` is the authoritative pack-level integrity value. MeshPack 2.0 hashes the complete `.meshpack` / `.mpack` archive bytes; there are no ZIP-entry exclusions. `manifest.pack_hash` and `manifest.signatures` are informational only and MUST NOT be used as the trust root for L3 validation.
+The sidecar `pack_hash` is the authoritative pack-level integrity value. MeshPack 2.0 hashes the complete `.meshpack` / `.mpack` archive bytes; there are no ZIP-entry exclusions. `mapping.db` is therefore included in `pack_hash` if present. `manifest.pack_hash` and `manifest.signatures` are informational only and MUST NOT be used as the trust root for L3 validation.
 
 Validators must compare `sidecar.pack_size_bytes` with the archive size, require `sidecar.hash_algo` to match `manifest.hash_algo`, compute the archive digest, and compare it with `sidecar.pack_hash`. When signature verification is requested, signatures are verified over the exact `sidecar.pack_hash` string.

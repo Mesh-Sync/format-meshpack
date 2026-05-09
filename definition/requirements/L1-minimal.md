@@ -33,8 +33,8 @@ Implementations MUST parse `manifest.json` and validate the `format_version` fie
 **Rationale**: Prevents silent data corruption from incompatible schema changes.
 
 **Verification**: 
-1. Create test pack with `format_version: "1.0.0"` → should parse successfully
-2. Create test pack with `format_version: "2.0.0"` → should return version error
+1. Create test pack with `format_version: "2.0.0"` → should parse successfully
+2. Create test pack with `format_version: "3.0.0"` → should return version error for 2.x implementations
 
 ---
 

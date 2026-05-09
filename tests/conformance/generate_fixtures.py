@@ -72,7 +72,7 @@ def generate_standard_l2() -> bytes:
 
     # Add sidecar
     sidecar = {
-        "format_version": "1.0.0",
+        "format_version": "2.0.0",
         "source_pack_hash": "sha256:" + "ab" * 32,
         "entries": [
             {

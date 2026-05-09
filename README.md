@@ -50,7 +50,7 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 | `just generate` | Generates SDK code for Python, Rust, TypeScript, and Java 17 into `generated/sdks/`. |
 | `just check-version` | Verifies all generated package versions match `VERSION`. |
 | `just determinism-check` | Runs generation twice and verifies generated source output is byte-identical. |
-| `just validate` | Validates all JSON schemas against the meta-schema. |
+| `just validate` | Validates all JSON schemas against the meta-schema and strict-validates the public sample archive. |
 | `just compile` | Builds the generated SDKs (Python wheel, Rust crate, NPM package, Maven package). |
 | `just lint` | Runs generator lint plus generated Rust, TypeScript, and Java compile checks. |
 | `just test` | Runs Python tests and generated Rust, TypeScript, and Java test/build gates. |

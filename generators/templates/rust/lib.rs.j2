@@ -99,19 +99,20 @@ impl MeshPackReader {
             let mut manifest_file = self.archive.by_name("manifest.json")?;
             let mut content = String::new();
             manifest_file.read_to_string(&mut content)?;
-            self.manifest = Some(serde_json::from_str(&content)?);
+            let manifest: Manifest = serde_json::from_str(&content)?;
+            self.manifest = Some(manifest);
         }
 
-        let names: Vec<String> = self.archive.file_names().map(|name| name.to_string()).collect();
-        for name in names {
-            if name.starts_with("index/") && name.ends_with(".json") {
-                let mut shard_file = self.archive.by_name(&name)?;
-                let mut content = String::new();
-                shard_file.read_to_string(&mut content)?;
-                let shard: Shard = serde_json::from_str(&content)?;
-                for entry in shard.entries {
-                    self.files.insert(entry.path.clone(), entry);
-                }
+        let shard_paths: Vec<String> = self.manifest.as_ref()
+            .map(|manifest| manifest.shard_list.iter().map(|shard_ref| format!("index/{}.json", shard_ref.id)).collect())
+            .unwrap_or_default();
+        for name in shard_paths {
+            let mut shard_file = self.archive.by_name(&name)?;
+            let mut content = String::new();
+            shard_file.read_to_string(&mut content)?;
+            let shard: Shard = serde_json::from_str(&content)?;
+            for entry in shard.entries {
+                self.files.insert(entry.path.clone(), entry);
             }
         }
 
@@ -588,3 +589,120 @@ pub struct {{ model.name }} {
 {% endfor %}
 {% endfor %}
 {% endfor %}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use zip::write::FileOptions;
+
+    const EMPTY_ENTRIES_HASH: &str = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+
+    fn unique_path(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("meshpack-rust-sdk-{name}-{}-{}.mpack", std::process::id(), Utc::now().timestamp_nanos_opt().unwrap_or_default()));
+        path
+    }
+
+    fn write_archive(path: &Path, entries: &[(&str, String)]) {
+        let file = File::create(path).expect("create archive");
+        let mut zip = zip::ZipWriter::new(file);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        for (name, content) in entries {
+            zip.start_file(*name, options).expect("start zip entry");
+            zip.write_all(content.as_bytes()).expect("write zip entry");
+        }
+        zip.finish().expect("finish archive");
+    }
+
+    fn manifest(entries_count: u64, entries_hash: &str) -> String {
+        serde_json::json!({
+            "format_version": VERSION,
+            "created_at": "2026-05-09T00:00:00Z",
+            "creator_info": { "name": "Rust SDK parity test" },
+            "platform_info": { "os": "linux", "path_separator": "/", "is_case_sensitive": true },
+            "index_summary": { "total_files": entries_count, "total_shards": 1, "total_size_bytes": 0 },
+            "hash_algo": "sha256",
+            "shard_list": [{ "id": "part-00001", "entries_count": entries_count, "entries_hash": entries_hash }]
+        }).to_string()
+    }
+
+    fn shard(entries: Value, entries_hash: &str) -> String {
+        serde_json::json!({
+            "shard_id": "part-00001",
+            "format_version": VERSION,
+            "entries_count": entries.as_array().map(|items| items.len()).unwrap_or_default(),
+            "entries_hash": entries_hash,
+            "entries": entries
+        }).to_string()
+    }
+
+    fn write_sidecar(path: &Path) -> PathBuf {
+        let archive_bytes = fs::read(path).expect("read archive");
+        let digest = compute_digest_hex(&archive_bytes, "sha256").expect("hash archive");
+        let sidecar_path = PathBuf::from(format!("{}.integrity", path.to_string_lossy()));
+        let sidecar = serde_json::json!({
+            "pack_name": path.file_name().and_then(|name| name.to_str()).expect("archive filename"),
+            "pack_size_bytes": archive_bytes.len(),
+            "hash_algo": "sha256",
+            "pack_hash": format!("sha256:{digest}"),
+            "computed_at": "2026-05-09T00:00:00Z",
+            "signatures": []
+        });
+        fs::write(&sidecar_path, sidecar.to_string()).expect("write sidecar");
+        sidecar_path
+    }
+
+    #[test]
+    fn validates_minimal_archive_with_sidecar_hash_verification() {
+        let archive = unique_path("valid");
+        write_archive(&archive, &[
+            ("manifest.json", manifest(0, EMPTY_ENTRIES_HASH)),
+            ("index/part-00001.json", shard(Value::Array(vec![]), EMPTY_ENTRIES_HASH)),
+        ]);
+        let sidecar = write_sidecar(&archive);
+
+        let result = validate_meshpack(&archive).expect("validate archive");
+
+        assert!(result.is_valid(), "{:?}", result.findings);
+        assert!(result.findings.iter().any(|finding| finding.code == "SDC-010"));
+        let _ = fs::remove_file(sidecar);
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn reports_missing_manifest() {
+        let archive = unique_path("missing-manifest");
+        write_archive(&archive, &[("index/part-00001.json", "{}".to_string())]);
+
+        let result = validate_meshpack(&archive).expect("validate archive");
+
+        assert!(!result.is_valid());
+        assert!(result.errors().iter().any(|finding| finding.code == "MAN-001"));
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn reports_unsafe_resource_ref() {
+        let archive = unique_path("unsafe-resource");
+        let entries = serde_json::json!([{
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 10,
+            "hash": format!("sha256:{}", "aa".repeat(32)),
+            "modified_at": "2026-05-09T00:00:00Z",
+            "resource_ref": "../secret.png",
+            "resource_hash": format!("sha256:{}", "bb".repeat(32))
+        }]);
+        write_archive(&archive, &[
+            ("manifest.json", manifest(1, &format!("sha256:{}", "00".repeat(32)))),
+            ("index/part-00001.json", shard(entries, &format!("sha256:{}", "00".repeat(32)))),
+        ]);
+
+        let result = validate_meshpack(&archive).expect("validate archive");
+
+        assert!(!result.is_valid());
+        assert!(result.errors().iter().any(|finding| finding.code == "RES-004"));
+        let _ = fs::remove_file(archive);
+    }
+}

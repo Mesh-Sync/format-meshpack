@@ -499,8 +499,12 @@ Object
 
     public List<String> readShardJsonDocuments() throws IOException {
       List<String> shards = new ArrayList<>();
-      for (ZipEntry entry : archive.stream().filter(e -> e.getName().startsWith("index/") && e.getName().endsWith(".json")).sorted((a, b) -> a.getName().compareTo(b.getName())).toList()) {
-        shards.add(readText(entry.getName()));
+      Manifest manifest = readManifest();
+      if (manifest.shard_list() == null) {
+        return shards;
+      }
+      for (ShardReference shardRef : manifest.shard_list()) {
+        shards.add(readText("index/" + shardRef.id() + ".json"));
       }
       return shards;
     }

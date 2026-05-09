@@ -93,8 +93,12 @@ export class MeshPackReader {
 
     this.manifest = JSON.parse(await manifestFile.async("string")) as Manifest;
 
-    const shardFiles = this.zip.file(/^index\/.*\.json$/).sort((a, b) => a.name.localeCompare(b.name));
-    for (const shardFile of shardFiles) {
+    for (const shardRef of this.manifest.shard_list ?? []) {
+      const shardPath = `index/${shardRef.id}.json`;
+      const shardFile = this.zip.file(shardPath);
+      if (!shardFile) {
+        throw new Error(`Shard file missing in archive: ${shardPath}`);
+      }
       const shard = JSON.parse(await shardFile.async("string")) as Shard;
       this.shards.push(shard);
       for (const entry of shard.entries) {

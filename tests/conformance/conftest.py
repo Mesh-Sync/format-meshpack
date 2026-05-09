@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import zipfile
@@ -31,11 +32,13 @@ _SENTINEL = object()
 # ---------------------------------------------------------------------------
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers for all requirement IDs."""
-    for level in ("L1", "L2", "L3"):
-        for i in range(200):
-            marker = f"REQ_{level}_{i:03d}"
-            config.addinivalue_line("markers", f"{marker}: Traces to requirement REQ-{level}-{i:03d}")
+    """Register custom markers for requirement IDs defined in the spec."""
+    requirements_dir = Path(__file__).parents[2] / "definition" / "requirements"
+    for requirement_file in sorted(requirements_dir.glob("L*.md")):
+        text = requirement_file.read_text(encoding="utf-8")
+        for requirement_id, title in re.findall(r"### (REQ-L\d-\d{3}):\s*(.+)", text):
+            marker = requirement_id.replace("-", "_")
+            config.addinivalue_line("markers", f"{marker}: Traces to {requirement_id}: {title}")
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ class MeshPackBuilder:
 
     def __init__(self) -> None:
         self._manifest: Dict[str, Any] = {
-            "format_version": "1.0.0",
+            "format_version": "2.0.0",
             "created_at": "2026-01-01T00:00:00+00:00",
             "workspace_id": None,
             "creator_info": {"name": "MeshPack Conformance Tests"},
@@ -94,18 +97,21 @@ class MeshPackBuilder:
         self,
         shard_id: str,
         entries: List[Dict[str, Any]],
-        entries_count: Optional[int] = None,
+        entries_count: Any = _SENTINEL,
         entries_hash: Any = _SENTINEL,
     ) -> "MeshPackBuilder":
         self._shards[shard_id] = {
             "shard_id": shard_id,
-            "format_version": "1.0.0",
+            "format_version": "2.0.0",
             "entries": entries,
         }
 
         # Auto-compute entries_hash via JCS when not explicitly provided
         if entries_hash is _SENTINEL:
             entries_hash = self._compute_entries_hash(entries)
+
+        if entries_count is _SENTINEL:
+            entries_count = len(entries)
 
         if entries_count is not None:
             self._shards[shard_id]["entries_count"] = entries_count
@@ -121,7 +127,14 @@ class MeshPackBuilder:
         self._manifest["shard_list"].append(shard_ref)
         self._manifest["index_summary"]["total_shards"] = len(self._shards)
         total_files = sum(len(s["entries"]) for s in self._shards.values())
+        total_size_bytes = sum(
+            entry.get("size_bytes", 0)
+            for shard in self._shards.values()
+            for entry in shard["entries"]
+            if isinstance(entry.get("size_bytes"), int)
+        )
         self._manifest["index_summary"]["total_files"] = total_files
+        self._manifest["index_summary"]["total_size_bytes"] = total_size_bytes
         return self
 
     def add_resource(self, name: str, data: bytes) -> "MeshPackBuilder":

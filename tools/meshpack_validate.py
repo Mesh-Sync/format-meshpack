@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MeshPack archive validator (v1.0.0).
+MeshPack archive validator.
 
 Validates .meshpack / .mpack archives against the MeshPack specification:
   - Manifest schema presence and required fields.
@@ -31,7 +31,7 @@ import os
 import re
 import sys
 import zipfile
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Set, Tuple
 
 from jsonschema import Draft7Validator
 from referencing import Registry, Resource
@@ -61,6 +61,12 @@ OFFICIAL_EXTENSION_SCHEMAS = {
     "meshsync_printability": "extensions/meshsync_printability.schema.json",
     "meshsync_thumbnails": "extensions/meshsync_thumbnails.schema.json",
 }
+
+
+def _zero_hash(algo: str) -> str:
+    if algo == "sha512":
+        return f"{algo}:{'0' * 128}"
+    return f"{algo}:{'0' * 64}"
 
 
 def _load_schema(filename: str) -> dict:
@@ -137,8 +143,27 @@ def validate_official_extensions(extensions: object, archive_path: str, schema_m
         return findings
 
     for extension_name, payload in extensions.items():
+        if extension_name == "_deleted":
+            continue
+
         schema_filename = OFFICIAL_EXTENSION_SCHEMAS.get(extension_name)
         if schema_filename is None:
+            if extension_name.startswith("meshsync_") or extension_name.startswith("_"):
+                findings.append(
+                    Finding(
+                        Severity.ERROR,
+                        "EXT-002",
+                        f"{archive_path}/extensions/{extension_name}: unknown extension uses a reserved prefix",
+                    )
+                )
+            elif "_" not in extension_name and ":" not in extension_name:
+                findings.append(
+                    Finding(
+                        Severity.WARNING,
+                        "EXT-001",
+                        f"{archive_path}/extensions/{extension_name}: custom extension key should use a namespace prefix",
+                    )
+                )
             continue
         extension_path = f"{archive_path}/extensions/{extension_name}"
         if not isinstance(payload, dict):
@@ -475,6 +500,69 @@ def check_manifest_fields(manifest: dict) -> List[Finding]:
     return findings
 
 
+def check_manifest_cross_fields(manifest: dict) -> List[Finding]:
+    """Validate manifest relationships that JSON Schema cannot express."""
+    findings: List[Finding] = []
+
+    workspace_id = manifest.get("workspace_id")
+    if workspace_id:
+        ids = manifest.get("ids")
+        workspace_ids = []
+        if isinstance(ids, list):
+            workspace_ids = [
+                item.get("id")
+                for item in ids
+                if isinstance(item, dict) and item.get("ns") == "meshsync:workspace"
+            ]
+        if workspace_id not in workspace_ids:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "MAN-020",
+                    "workspace_id must match an ids entry with ns='meshsync:workspace'",
+                )
+            )
+
+    generation = manifest.get("generation")
+    if isinstance(generation, dict) and generation.get("partial") is True:
+        if not generation.get("base_pack_hash"):
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "MAN-021",
+                    "generation.partial=true requires generation.base_pack_hash",
+                )
+            )
+
+    return findings
+
+
+def check_index_summary(manifest: dict, total_entries: int, total_size_bytes: int, total_shards: int) -> List[Finding]:
+    """Validate manifest.index_summary against parsed shard contents."""
+    findings: List[Finding] = []
+    summary = manifest.get("index_summary")
+    if not isinstance(summary, dict):
+        return findings
+
+    expected = {
+        "total_files": total_entries,
+        "total_shards": total_shards,
+        "total_size_bytes": total_size_bytes,
+    }
+    for field, actual_value in expected.items():
+        declared_value = summary.get(field)
+        if declared_value is not None and declared_value != actual_value:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "MAN-022",
+                    f"index_summary.{field} mismatch: manifest={declared_value} actual={actual_value}",
+                )
+            )
+
+    return findings
+
+
 def check_shard_id(shard_id: str, shard_path: str) -> List[Finding]:
     """Validate shard_id matches the 5-digit pattern."""
     findings: List[Finding] = []
@@ -619,8 +707,14 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
     """Validate all shards referenced by the manifest."""
     findings: List[Finding] = []
     algo = manifest.get("hash_algo", "sha256")
+    archive_names: Set[str] = set(zf.namelist())
+    total_entries = 0
+    total_size_bytes = 0
+    listed_shard_paths: Set[str] = set()
 
     shard_list = manifest.get("shard_list")
+    if shard_list is not None and not isinstance(shard_list, list):
+        shard_list = []
     if not shard_list:
         # Fallback: discover shards from archive
         shard_list = [
@@ -640,6 +734,7 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
     for shard_meta in shard_list:
         shard_id = shard_meta.get("id", "")
         shard_path = f"index/{shard_id}.json"
+        listed_shard_paths.add(shard_path)
 
         # Check shard_id format
         findings.extend(check_shard_id(shard_id, shard_path))
@@ -663,7 +758,36 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
 
         findings.extend(validate_json_schema(shard, "shard.schema.json", shard_path, schema_mode))
 
+        if shard.get("shard_id") != shard_id:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "SHD-008",
+                    f"shard_id mismatch for {shard_path}: manifest={shard_id} shard={shard.get('shard_id')}",
+                )
+            )
+
+        manifest_version = manifest.get("format_version")
+        shard_version = shard.get("format_version")
+        if manifest_version and shard_version and manifest_version != shard_version:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "SHD-009",
+                    f"format_version mismatch for {shard_path}: manifest={manifest_version} shard={shard_version}",
+                )
+            )
+
         entries = shard.get("entries", [])
+        if not isinstance(entries, list):
+            continue
+
+        total_entries += len(entries)
+        total_size_bytes += sum(
+            entry.get("size_bytes", 0)
+            for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("size_bytes"), int)
+        )
 
         # Check entry ordering (lexicographic by path)
         paths = [e.get("path", "") for e in entries]
@@ -684,8 +808,28 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
                 )
             )
 
+        shard_count = shard.get("entries_count")
+        if shard_count is not None and shard_count != len(entries):
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "SHD-005",
+                    f"entries_count mismatch in {shard_path}: shard={shard_count} actual={len(entries)}",
+                )
+            )
+
         # Validate entries_hash
         expected_hash = shard_meta.get("entries_hash") or shard.get("entries_hash")
+        shard_hash = shard.get("entries_hash")
+        meta_hash = shard_meta.get("entries_hash")
+        if meta_hash and shard_hash and meta_hash != shard_hash:
+            findings.append(
+                Finding(
+                    Severity.ERROR,
+                    "SHD-012",
+                    f"entries_hash mismatch between manifest and {shard_path}: manifest={meta_hash} shard={shard_hash}",
+                )
+            )
         if expected_hash:
             try:
                 ok, actual = verify_entries_hash(entries, algo, expected_hash)
@@ -706,6 +850,8 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
 
         # Validate individual entries
         for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             entry_path = entry.get("path", "<unknown>")
 
             # Path constraints
@@ -723,6 +869,34 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
             # Hash format
             entry_hash = entry.get("hash", "")
             findings.extend(check_hash_format(entry_hash, shard_path, entry_path))
+            if entry.get("resource_hash"):
+                findings.extend(check_hash_format(entry.get("resource_hash", ""), shard_path, entry_path))
+
+            if entry.get("operation") == "delete":
+                if entry.get("size_bytes") != 0:
+                    findings.append(
+                        Finding(
+                            Severity.ERROR,
+                            "DEL-001",
+                            f"delete entry must have size_bytes=0 in {shard_path}:{entry_path}",
+                        )
+                    )
+                if entry_hash != _zero_hash(algo):
+                    findings.append(
+                        Finding(
+                            Severity.ERROR,
+                            "DEL-002",
+                            f"delete entry must use zero hash {_zero_hash(algo)} in {shard_path}:{entry_path}",
+                        )
+                    )
+                if entry.get("resource_ref") or entry.get("preview_ref"):
+                    findings.append(
+                        Finding(
+                            Severity.ERROR,
+                            "DEL-003",
+                            f"delete entry must not reference embedded resources in {shard_path}:{entry_path}",
+                        )
+                    )
 
             # Resource ref consistency
             resource_ref = entry.get("resource_ref")
@@ -740,7 +914,7 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
             if resource_ref:
                 findings.extend(check_resource_ref(resource_ref, "resource_ref", shard_path, entry_path))
                 resource_path = f"resources/{resource_ref}"
-                if resource_path not in zf.namelist():
+                if resource_path not in archive_names:
                     findings.append(
                         Finding(
                             Severity.ERROR,
@@ -748,12 +922,36 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
                             f"Missing embedded resource: {resource_path} (referenced by {entry_path})",
                         )
                     )
+                else:
+                    resource_bytes = zf.read(resource_path)
+                    if resource_hash:
+                        try:
+                            actual_hash = f"{algo}:{compute_digest([resource_bytes], algo)}"
+                            if actual_hash != resource_hash:
+                                findings.append(
+                                    Finding(
+                                        Severity.ERROR,
+                                        "RES-005",
+                                        f"resource_hash mismatch for {resource_path}: expected {resource_hash}, got {actual_hash}",
+                                    )
+                                )
+                        except ValueError as exc:
+                            findings.append(Finding(Severity.WARNING, "RES-006", str(exc)))
+                    resource_size = entry.get("resource_size_bytes")
+                    if resource_size is not None and resource_size != len(resource_bytes):
+                        findings.append(
+                            Finding(
+                                Severity.ERROR,
+                                "RES-007",
+                                f"resource_size_bytes mismatch for {resource_path}: expected {resource_size}, got {len(resource_bytes)}",
+                            )
+                        )
 
             preview_ref = entry.get("preview_ref")
             if preview_ref:
                 findings.extend(check_resource_ref(preview_ref, "preview_ref", shard_path, entry_path))
                 preview_path = f"resources/{preview_ref}"
-                if preview_path not in zf.namelist():
+                if preview_path not in archive_names:
                     findings.append(
                         Finding(
                             Severity.ERROR,
@@ -761,6 +959,18 @@ def verify_shards(zf: zipfile.ZipFile, manifest: dict, schema_mode: str) -> List
                             f"Missing embedded resource: {preview_path} (referenced by {entry_path})",
                         )
                     )
+
+    actual_shards = {name for name in archive_names if re.match(r"^index/part-\d+\.json$", name)}
+    for rogue_shard in sorted(actual_shards - listed_shard_paths):
+        findings.append(
+            Finding(
+                Severity.ERROR,
+                "SHD-011",
+                f"Archive contains unlisted shard: {rogue_shard}",
+            )
+        )
+
+    findings.extend(check_index_summary(manifest, total_entries, total_size_bytes, len(shard_list)))
 
     return findings
 
@@ -1014,6 +1224,7 @@ def validate(
 
         # Manifest field validation
         findings.extend(check_manifest_fields(manifest))
+        findings.extend(check_manifest_cross_fields(manifest))
         findings.extend(
             validate_json_schema(manifest, "manifest.schema.json", "manifest.json", schema_mode)
         )

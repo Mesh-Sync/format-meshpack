@@ -45,10 +45,10 @@ def _write_sidecar(path: str, sidecar: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L3-001: Delta packs MUST use 'operation' field
+# REQ-L3-020: Delta packs MUST use 'operation' field
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L3_001
+@pytest.mark.REQ_L3_020
 class TestDeltaOperations:
     def test_operation_field_accepted(self, pack_builder: MeshPackBuilder) -> None:
         """Entries with 'operation' field should not produce errors."""
@@ -65,7 +65,7 @@ class TestDeltaOperations:
                 "path": "models/old.stl",
                 "original_name": "old.stl",
                 "size_bytes": 0,
-                "hash": "sha256:" + "bb" * 32,
+                "hash": "sha256:" + "0" * 64,
                 "modified_at": "2026-01-01T00:00:00+00:00",
                 "operation": "delete",
             },
@@ -80,12 +80,80 @@ class TestDeltaOperations:
         finally:
             os.unlink(path)
 
+    def test_delete_entry_rejects_nonzero_metadata(self, pack_builder: MeshPackBuilder) -> None:
+        entry = {
+            "path": "models/old.stl",
+            "original_name": "old.stl",
+            "size_bytes": 10,
+            "hash": "sha256:" + "bb" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+            "operation": "delete",
+            "resource_ref": "a" * 64 + ".png",
+            "resource_hash": "sha256:" + "aa" * 32,
+        }
+        path = pack_builder.add_shard("part-00001", [entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = {f.code for f in findings if f.severity == Severity.ERROR}
+            assert {"DEL-001", "DEL-002", "DEL-003"}.issubset(errors)
+        finally:
+            os.unlink(path)
+
+    def test_partial_generation_requires_base_pack_hash(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        pack_builder.set_manifest_field("generation", {"partial": True})
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "MAN-021" for f in errors)
+        finally:
+            os.unlink(path)
+
+
+@pytest.mark.REQ_L3_003
+class TestWorkspaceIdentity:
+    def test_workspace_id_must_match_namespaced_id(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        pack_builder.set_manifest_field("workspace_id", "11111111-1111-4111-8111-111111111111")
+        pack_builder.set_manifest_field("ids", [{"ns": "meshsync:workspace", "id": "22222222-2222-4222-8222-222222222222"}])
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "MAN-020" for f in errors)
+        finally:
+            os.unlink(path)
+
+
+@pytest.mark.REQ_L3_042
+class TestExtensionNamespaces:
+    def test_custom_extension_without_namespace_warns(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        entry = dict(minimal_valid_entry)
+        entry["extensions"] = {"custom": {"enabled": True}}
+        path = pack_builder.add_shard("part-00001", [entry]).build_to_file()
+        try:
+            findings = validate(path)
+            warnings = [f for f in findings if f.severity == Severity.WARNING]
+            assert any(f.code == "EXT-001" for f in warnings)
+        finally:
+            os.unlink(path)
+
+    def test_unknown_reserved_extension_prefix_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        entry = dict(minimal_valid_entry)
+        entry["extensions"] = {"meshsync_future": {"enabled": True}}
+        path = pack_builder.add_shard("part-00001", [entry]).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "EXT-002" for f in errors)
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
-# REQ-L3-010: import_policy field validation (schema-authoritative names)
+# REQ-L2-041: import_policy field validation (schema-authoritative names)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L3_010
+@pytest.mark.REQ_L2_041
 class TestImportPolicy:
     @pytest.mark.parametrize("id_conflict", ["fail", "skip", "overwrite"])
     def test_valid_id_conflict_values(self, id_conflict: str) -> None:
@@ -105,10 +173,10 @@ class TestImportPolicy:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L3-020: Sidecar verification
+# REQ-L2-012: Sidecar verification
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L3_020
+@pytest.mark.REQ_L2_012
 class TestSidecarVerification:
     def test_sidecar_detected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
         """Validator should detect .meshpack.integrity sidecar file."""
@@ -189,6 +257,8 @@ class TestSidecarVerification:
 cryptography = pytest.importorskip("cryptography", reason="cryptography package not installed")
 
 
+@pytest.mark.REQ_L3_030
+@pytest.mark.REQ_L3_031
 class TestSignatureVerificationCrypto:
     """Verify that Ed25519 and RSA-PSS-SHA256 signatures are checked."""
 

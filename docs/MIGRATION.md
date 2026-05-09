@@ -14,7 +14,7 @@ Important changes for SDK consumers:
 6. `resource_ref`, `preview_ref`, and `meshsync_thumbnails.v2` values are flat resource filenames (`{lowercase_hex_hash}.{extension}`), not prefixed hashes such as `sha256:...`.
 7. `meshsync_dependencies.v2` values are safe POSIX-relative FileEntry paths. Absolute paths, drive letters, traversal segments, and backslashes are invalid.
 
-The Python reference validator remains the authority for detached sidecar and signature verification.
+The Python reference validator remains the authority for strict JSON Schema validation, official extension validation, detached sidecar verification, and signature verification.
 
 ## Migrating from `_deleted` Extension to `operation` Field
 
@@ -38,6 +38,10 @@ FileEntry (per TDD-050 AD-4):
 ```json
 {
   "path": "models/old-part.stl",
+  "original_name": "old-part.stl",
+  "size_bytes": 0,
+  "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "modified_at": "2026-01-01T00:00:00+00:00",
   "operation": "delete"
 }
 ```
@@ -49,7 +53,7 @@ For each entry in your shard that uses the `_deleted` extension:
 1. **Remove** the `_deleted` key from `extensions`
 2. **Add** `"operation": "delete"` to the FileEntry
 3. If the `extensions` object is now empty, remove it entirely
-4. Remove fields that are meaningless for deletions (`size_bytes`, `hash`, etc.) — only `path` and `operation` are required
+4. Set deletion metadata to canonical empty-file values: `size_bytes=0` and a zero hash using the pack hash algorithm. MeshPack 2.0 schemas still require `original_name`, `size_bytes`, `hash`, and `modified_at` on every FileEntry, including deletions.
 
 #### Before (pre-v1.0)
 
@@ -65,11 +69,14 @@ For each entry in your shard that uses the `_deleted` extension:
 }
 ```
 
-#### After (v1.0+)
+#### After (MeshPack 2.0)
 
 ```json
 {
   "path": "models/old-part.stl",
+  "original_name": "old-part.stl",
+  "size_bytes": 0,
+  "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "operation": "delete",
   "modified_at": "2026-01-01T00:00:00+00:00"
 }

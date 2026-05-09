@@ -331,7 +331,7 @@ Implementations MUST merge delta packs:
 
 **Constraints**:
 - Delta packs with unresolvable `base_pack_hash` are INVALID
-- Chains of deltas (delta-of-delta) are NOT supported in v1.0
+- Chains of deltas (delta-of-delta) are NOT supported in MeshPack 2.0
 - Implementations SHOULD flatten delta chains before distribution
 
 **Rationale**: Standard merge algorithm ensures consistency across implementations.
@@ -503,7 +503,7 @@ Implementations MUST parse and validate official MeshSync extensions:
 {
   "extensions": {
     "meshsync_dependencies": {
-      "v1": {
+      "v2": {
         "materials": ["materials/chrome.mtl"],
         "textures": ["textures/diffuse.png", "textures/normal.png"],
         "references": ["parts/wheel.obj"]
@@ -648,25 +648,24 @@ Extensions SHOULD map to MeshSync backend `ModelTechnicalMetadata` schema:
 **Type**: MAY
 **Testable**: Yes
 
-Implementations MAY include AI-enriched content metadata:
+Implementations MAY include rich content metadata:
 
 ```json
 {
   "extensions": {
     "meshsync_content": {
       "v1": {
-        "ai_generated_title": "Articulated Dragon Figurine",
-        "ai_generated_description": "A detailed...",
-        "ai_generated_tags": ["dragon", "fantasy", "articulated"],
-        "ai_model_version": "gpt-4o-2024-01",
-        "generation_timestamp": "2026-01-16T12:00:00Z"
+          "title": "Articulated Dragon Figurine",
+          "description": "A detailed multi-part figurine prepared for marketplace display.",
+          "language": "en",
+          "tags": ["dragon", "fantasy", "articulated"]
       }
     }
   }
 }
 ```
 
-**Rationale**: Preserves AI enrichment from `worker-metadata-generation`.
+  **Rationale**: Preserves marketplace-ready title, description, language, and tag metadata. AI provenance MAY be added by a future versioned extension without changing the v1 schema.
 
 ---
 

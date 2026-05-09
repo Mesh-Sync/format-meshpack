@@ -42,10 +42,11 @@ class TestArchiveFormat:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L1-002: manifest.json MUST exist at ZIP root
+# REQ-L1-003 / REQ-L1-041: manifest.json is required and errors are clear
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L1_002
+@pytest.mark.REQ_L1_003
+@pytest.mark.REQ_L1_041
 class TestManifestPresence:
     def test_manifest_exists(self, tmp_meshpack: str) -> None:
         """manifest.json must be present in the archive."""
@@ -74,10 +75,10 @@ class TestManifestPresence:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L1-003: format_version MUST be valid semver
+# REQ-L1-002: format_version MUST be validated before processing
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L1_003
+@pytest.mark.REQ_L1_002
 class TestFormatVersion:
     def test_valid_semver(self, tmp_meshpack: str) -> None:
         """format_version in manifest is valid semver."""
@@ -88,11 +89,11 @@ class TestFormatVersion:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L1-004: hash_algo MUST be present and supported
+# REQ-L1-003 / REQ-L2-013: hash_algo MUST be present and supported
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L1_004
 class TestHashAlgo:
+    @pytest.mark.REQ_L1_003
     def test_hash_algo_required(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
         """Missing hash_algo is flagged."""
         pack_builder.remove_manifest_field("hash_algo")
@@ -104,6 +105,7 @@ class TestHashAlgo:
         finally:
             os.unlink(path)
 
+    @pytest.mark.REQ_L2_013
     def test_unsupported_algo_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
         """Unsupported hash_algo value is flagged."""
         pack_builder.set_manifest_field("hash_algo", "md5")
@@ -117,10 +119,41 @@ class TestHashAlgo:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L1-010: Entries MUST have path, size_bytes, hash
+# REQ-L1-010: Manifest shard_list MUST discover index shards
 # ---------------------------------------------------------------------------
 
 @pytest.mark.REQ_L1_010
+class TestShardDiscovery:
+    def test_manifest_shards_exist_under_index(self, tmp_meshpack: str) -> None:
+        """Every manifest shard reference maps to an index/part-XXXXX.json file."""
+        with zipfile.ZipFile(tmp_meshpack) as zf:
+            manifest = json.loads(zf.read("manifest.json"))
+            names = set(zf.namelist())
+        for shard_ref in manifest["shard_list"]:
+            assert f"index/{shard_ref['id']}.json" in names
+
+
+# ---------------------------------------------------------------------------
+# REQ-L1-011: Shards MUST contain required fields
+# ---------------------------------------------------------------------------
+
+@pytest.mark.REQ_L1_011
+class TestShardRequiredFields:
+    def test_shard_required_fields_present(self, tmp_meshpack: str) -> None:
+        """Shard documents expose the required metadata fields."""
+        required = {"shard_id", "format_version", "entries_count", "entries_hash", "entries"}
+        with zipfile.ZipFile(tmp_meshpack) as zf:
+            for name in zf.namelist():
+                if name.startswith("index/part-"):
+                    shard = json.loads(zf.read(name))
+                    assert required.issubset(shard), f"{name} missing {required - set(shard)}"
+
+
+# ---------------------------------------------------------------------------
+# REQ-L1-012: FileEntry objects MUST contain required fields
+# ---------------------------------------------------------------------------
+
+@pytest.mark.REQ_L1_012
 class TestEntryRequiredFields:
     def test_entry_has_path(self, tmp_meshpack: str) -> None:
         """Every entry must have a 'path' field."""
@@ -133,10 +166,10 @@ class TestEntryRequiredFields:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L1-011: Paths MUST NOT exceed 1024 chars
+# REQ-L1-013: Paths MUST NOT exceed 1024 chars
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L1_011
+@pytest.mark.REQ_L1_013
 class TestPathLength:
     def test_long_path_flagged(self, pack_builder: MeshPackBuilder) -> None:
         """Path exceeding 1024 chars must produce an error."""
@@ -157,10 +190,10 @@ class TestPathLength:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L1-012: Paths MUST NOT contain traversal sequences
+# REQ-L1-013: Paths MUST NOT contain traversal sequences
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L1_012
+@pytest.mark.REQ_L1_013
 class TestPathTraversal:
     def test_traversal_flagged(self, pack_builder: MeshPackBuilder) -> None:
         """Paths with '..' must produce an error."""

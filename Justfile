@@ -55,6 +55,8 @@ validate:
     check-jsonschema --check-metaschema schema/extensions/meshsync_thumbnails.schema.json
     check-jsonschema --check-metaschema schema/extensions/meshsync_printability.schema.json
     check-jsonschema --check-metaschema schema/extensions/meshsync_dependencies.schema.json
+    @echo "Validating public sample archive..."
+    python3 tools/meshpack_validate.py --strict samples/test-workspace.mpack
 
 compile:
     @echo "Compiling Python..."

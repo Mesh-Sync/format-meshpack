@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [2.0.0] - 2026-05-09
+
 ### Added
 - **IANA Media Type Registration**: `definition/iana-media-type-registration.md` — RFC 6838 registration template for `application/vnd.meshsync.meshpack+zip` (#21)
 - **MeshPack 2.0 Schema Line**: versioned schema IDs and catalog URLs now use `/schemas/meshpack/2.0/`

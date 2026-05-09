@@ -523,6 +523,11 @@ typed-builder = "0.18"
         os.path.join(OUTPUT_DIR, "typescript", "src", "index.ts"),
     )
     render_template(
+        "typescript/index.test.ts.j2",
+        context,
+        os.path.join(OUTPUT_DIR, "typescript", "src", "index.test.ts"),
+    )
+    render_template(
         "typescript/tsconfig.json.j2",
         context,
         os.path.join(OUTPUT_DIR, "typescript", "tsconfig.json"),
@@ -533,10 +538,11 @@ typed-builder = "0.18"
         "license": "MIT",
         "main": "dist/index.js",
         "types": "dist/index.d.ts",
+        "files": ["dist/index.js", "dist/index.d.ts", "src/index.ts", "README.md"],
         "scripts": {
             "build": "tsc",
             "lint": "tsc --noEmit",
-            "test": "npm run build"
+            "test": "npm run build && node --test dist/index.test.js"
         },
         "dependencies": {"@noble/hashes": "^1.7.1", "jszip": "^3.10.1"},
         "devDependencies": {"@types/node": "^20.0.0", "typescript": "^5.0.0"},

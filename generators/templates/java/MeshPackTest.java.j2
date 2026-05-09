@@ -7,12 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import org.junit.jupiter.api.Test;
 
 class MeshPackTest {
+  private static final String EMPTY_ENTRIES_HASH = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+
   @Test
   void readerAcceptsWireEnumsAndUnknownFields() throws Exception {
     Path archive = Files.createTempFile("meshpack-java-sdk", ".meshpack");
@@ -20,7 +24,7 @@ class MeshPackTest {
       try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
         writeEntry(zip, "manifest.json", """
             {
-              "format_version": "1.0.0",
+              "format_version": "2.0.0",
               "created_at": "2026-01-13T22:41:51Z",
               "creator_info": { "name": "Java SDK Test", "unknown": true },
               "platform_info": {
@@ -48,7 +52,7 @@ class MeshPackTest {
         writeEntry(zip, "index/part-00001.json", """
             {
               "shard_id": "part-00001",
-              "format_version": "1.0.0",
+              "format_version": "2.0.0",
               "entries_count": 1,
               "entries_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "entries": [
@@ -95,6 +99,100 @@ class MeshPackTest {
     } finally {
       Files.deleteIfExists(archive);
     }
+  }
+
+  @Test
+  void validatorAcceptsMinimalArchiveWithSidecarHashVerification() throws Exception {
+    Path archive = Files.createTempFile("meshpack-java-sdk-valid", ".mpack");
+    Path sidecar = Path.of(archive.toString() + ".integrity");
+    try {
+      try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+        writeEntry(zip, "manifest.json", manifest(0, EMPTY_ENTRIES_HASH));
+        writeEntry(zip, "index/part-00001.json", shard("[]", EMPTY_ENTRIES_HASH));
+      }
+      writeSidecar(archive, sidecar);
+
+      MeshPack.ValidationResult result = MeshPack.validate(archive);
+
+      assertTrue(result.valid(), result.findings().toString());
+      assertTrue(result.findings().stream().anyMatch(finding -> "SDC-010".equals(finding.code())));
+    } finally {
+      Files.deleteIfExists(sidecar);
+      Files.deleteIfExists(archive);
+    }
+  }
+
+  @Test
+  void validatorReportsUnsafeResourceRef() throws Exception {
+    Path archive = Files.createTempFile("meshpack-java-sdk-unsafe-resource", ".mpack");
+    String bogusHash = "sha256:" + "0".repeat(64);
+    String entries = """
+        [
+          {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 10,
+            "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "modified_at": "2026-05-09T00:00:00Z",
+            "resource_ref": "../secret.png",
+            "resource_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ]
+        """;
+    try {
+      try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+        writeEntry(zip, "manifest.json", manifest(1, bogusHash));
+        writeEntry(zip, "index/part-00001.json", shard(entries, bogusHash));
+      }
+
+      MeshPack.ValidationResult result = MeshPack.validate(archive);
+
+      assertFalse(result.valid());
+      assertTrue(result.errors().stream().anyMatch(finding -> "RES-004".equals(finding.code())));
+    } finally {
+      Files.deleteIfExists(archive);
+    }
+  }
+
+  private static String manifest(int entriesCount, String entriesHash) {
+    return """
+        {
+          "format_version": "{{ version }}",
+          "created_at": "2026-05-09T00:00:00Z",
+          "creator_info": { "name": "Java SDK parity test" },
+          "platform_info": { "os": "linux", "path_separator": "/", "is_case_sensitive": true },
+          "index_summary": { "total_files": %d, "total_shards": 1, "total_size_bytes": 0 },
+          "hash_algo": "sha256",
+          "shard_list": [{ "id": "part-00001", "entries_count": %d, "entries_hash": "%s" }]
+        }
+        """.formatted(entriesCount, entriesCount, entriesHash);
+  }
+
+  private static String shard(String entries, String entriesHash) {
+    return """
+        {
+          "shard_id": "part-00001",
+          "format_version": "{{ version }}",
+          "entries_count": %d,
+          "entries_hash": "%s",
+          "entries": %s
+        }
+        """.formatted(entries.equals("[]") ? 0 : 1, entriesHash, entries);
+  }
+
+  private static void writeSidecar(Path archive, Path sidecar) throws Exception {
+    byte[] archiveBytes = Files.readAllBytes(archive);
+    String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(archiveBytes));
+    Files.writeString(sidecar, """
+        {
+          "pack_name": "%s",
+          "pack_size_bytes": %d,
+          "hash_algo": "sha256",
+          "pack_hash": "sha256:%s",
+          "computed_at": "2026-05-09T00:00:00Z",
+          "signatures": []
+        }
+        """.formatted(archive.getFileName(), archiveBytes.length, digest));
   }
 
   private static void writeEntry(ZipOutputStream zip, String name, String contents) throws Exception {

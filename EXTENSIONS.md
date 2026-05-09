@@ -280,7 +280,7 @@ All fields are flat resource filenames pointing to entries in `resources/`.
 
 ### `_deleted` (Deprecated)
 
-> **Deprecated in v1.0.0**: Use the `operation` field on `FileEntry` instead.
+> **Deprecated**: Use the `operation` field on `FileEntry` instead.
 > The `_deleted` extension marker is retained for backward compatibility with
 > pre-1.0 delta packs but MUST NOT be used in new packs.
 

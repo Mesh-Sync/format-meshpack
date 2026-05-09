@@ -40,8 +40,8 @@ the requirement ID from `definition/requirements/`. This enables:
 
 ## Adding New Tests
 
-1. Identify the requirement ID (e.g., `REQ-L2-005`)
+1. Identify the requirement ID from `definition/requirements/` (e.g., `REQ-L2-003`)
 2. Add a test in the appropriate file (`test_l2_standard.py`)
-3. Decorate with `@pytest.mark.REQ_L2_005`
+3. Decorate with `@pytest.mark.REQ_L2_003`
 4. Add or reuse a fixture from `fixtures/`
-5. Run `pytest --co -q` to verify the test is discovered
+5. Run `pytest tests/test_requirement_traceability.py --co -q` to verify the marker maps to a documented requirement

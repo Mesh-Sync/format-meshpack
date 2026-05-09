@@ -403,12 +403,12 @@ class MeshPackReader:
         with self._zip.open("manifest.json") as manifest_file:
             self._manifest = Manifest(**json.load(manifest_file))
 
-        for name in self._zip.namelist():
-            if name.startswith("index/") and name.endswith(".json"):
-                with self._zip.open(name) as shard_file:
-                    shard = Shard(**json.load(shard_file))
-                    for entry in shard.entries:
-                        self._files[entry.path] = entry
+        for shard_ref in self._manifest.shard_list:
+            shard_path = f"index/{shard_ref.id}.json"
+            with self._zip.open(shard_path) as shard_file:
+                shard = Shard(**json.load(shard_file))
+                for entry in shard.entries:
+                    self._files[entry.path] = entry
 
         self._loaded = True
 

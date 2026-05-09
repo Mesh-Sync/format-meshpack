@@ -182,7 +182,7 @@ When reading a pack, implementations MUST:
 
 The authoritative `pack_hash` MUST be distributed via a detached sidecar file:
 
-**Sidecar filename**: `{packname}.meshpack.integrity`
+**Sidecar filename**: `{archive-filename}.integrity` (for example, `library.meshpack.integrity` or `library.mpack.integrity`)
 
 > **Note**: The `.integrity` extension is used instead of `.sig` to avoid confusion with PGP/GPG detached signature files.
 
@@ -200,13 +200,13 @@ The authoritative `pack_hash` MUST be distributed via a detached sidecar file:
 
 **Generation sequence**:
 1. Create complete archive (manifest contains placeholder `pack_hash`)
-2. Compute hash of the complete archive bytes
+2. Compute hash of the complete archive bytes, including every ZIP entry and byte present in the finalized archive
 3. Write sidecar file with computed hash
 
 **Verification sequence**:
 1. Read sidecar file
 2. Compare `pack_size_bytes` against the archive size
-3. Compute hash of the complete archive bytes
+3. Compute hash of the complete archive bytes, including optional files such as `mapping.db` if present
 4. Compare to `sidecar.pack_hash`
 5. **MUST NOT** use `manifest.pack_hash` for verification (it's a reference only)
 
@@ -498,24 +498,26 @@ For formats that embed units (3MF, STEP), implementations MAY extract and popula
 
 ## 7. Exclusion Requirements
 
-### REQ-L2-060: mapping.db Exclusion
+### REQ-L2-060: mapping.db Handling
 
 **Category**: Integrity
 **Type**: MUST
 **Testable**: Yes
 
 The optional `mapping.db` SQLite file:
-1. MUST be excluded from `pack_hash` computation
+1. MUST be included in whole-archive sidecar `pack_hash` computation when present
 2. MUST NOT be included in shard `entries`
 3. MAY be included in archive for consumer convenience
-4. Consumers SHOULD regenerate from shards if present
+4. SHOULD be omitted from public reproducible release artifacts because SQLite cache bytes may be non-deterministic
+5. Consumers SHOULD regenerate from shards if integrity or reproducibility is critical
 
-**Rationale**: SQLite files are non-deterministic (page ordering varies).
+**Rationale**: MeshPack 2.0 sidecars hash the complete finalized archive bytes. SQLite cache files are non-deterministic, so public producers should omit them rather than special-case hash exclusions.
 
 **Verification**: 
 1. Generate pack with `mapping.db`
-2. Delete and regenerate `mapping.db`
-3. Verify `pack_hash` unchanged
+2. Compute sidecar `pack_hash`
+3. Modify, delete, or regenerate `mapping.db`
+4. Verify `pack_hash` changes unless the entire archive is rebuilt byte-identically
 
 ---
 
@@ -542,6 +544,6 @@ The optional `mapping.db` SQLite file:
 | REQ-L2-050 | Model File Detection | SHOULD | ☐ |
 | REQ-L2-051 | Bounding Box Calculation | MAY | ☐ |
 | REQ-L2-052 | Unit Detection | MAY | ☐ |
-| REQ-L2-060 | mapping.db Exclusion | MUST | ☐ |
+| REQ-L2-060 | mapping.db Handling | MUST | ☐ |
 
 **Minimum for L2 Compliance**: All L1 MUST + All L2 MUST requirements (20 total)

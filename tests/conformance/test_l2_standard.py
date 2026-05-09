@@ -28,6 +28,23 @@ from tools.meshpack_validate import (  # noqa: E402
 from .conftest import MeshPackBuilder  # noqa: E402
 
 
+def _write_sidecar(path: str, pack_hash: str | None = None) -> str:
+    with open(path, "rb") as archive_file:
+        digest = hashlib.sha256(archive_file.read()).hexdigest()
+    sidecar = {
+        "pack_name": os.path.basename(path),
+        "pack_size_bytes": os.path.getsize(path),
+        "hash_algo": "sha256",
+        "pack_hash": pack_hash or f"sha256:{digest}",
+        "computed_at": "2026-05-09T00:00:00Z",
+        "signatures": [],
+    }
+    sidecar_path = path + ".integrity"
+    with open(sidecar_path, "w", encoding="utf-8") as sidecar_file:
+        json.dump(sidecar, sidecar_file)
+    return sidecar_path
+
+
 # ---------------------------------------------------------------------------
 # REQ-L2-000: manifest.json MUST be the first ZIP entry
 # ---------------------------------------------------------------------------
@@ -52,9 +69,10 @@ class TestZipOrdering:
 
 
 # ---------------------------------------------------------------------------
-# Spec §2.1: only DEFLATE or STORE compression methods
+# REQ-L2-001: only DEFLATE or STORE compression methods
 # ---------------------------------------------------------------------------
 
+@pytest.mark.REQ_L2_001
 class TestZipCompression:
     def test_deflate_accepted(self, tmp_meshpack: str) -> None:
         """DEFLATE compression must not produce ZIP-003."""
@@ -101,10 +119,10 @@ class TestZipBombProtection:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L2-001: shard_list MUST be present and non-empty
+# REQ-L1-003: shard_list MUST be present and non-empty
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L2_001
+@pytest.mark.REQ_L1_003
 class TestShardList:
     def test_shard_list_present(self, tmp_meshpack: str) -> None:
         """Manifest must contain shard_list."""
@@ -115,10 +133,10 @@ class TestShardList:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L2-002: Shard IDs MUST match ^part-\d{5}$
+# REQ-L2-003: Shard IDs MUST match ^part-\d{5}$
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L2_002
+@pytest.mark.REQ_L2_003
 class TestShardIdFormat:
     def test_valid_shard_id(self, tmp_meshpack: str) -> None:
         """Shards should have 5-digit zero-padded IDs."""
@@ -134,7 +152,7 @@ class TestShardIdFormat:
         # Manually add shard file with old name
         pack_builder._shards["part-001"] = {
             "shard_id": "part-001",
-            "format_version": "1.0.0",
+            "format_version": "2.0.0",
             "entries": [minimal_valid_entry],
         }
         path = pack_builder.build_to_file()
@@ -147,10 +165,10 @@ class TestShardIdFormat:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L2-005: entries MUST be sorted lexicographically by path
+# REQ-L2-003: entries MUST be sorted lexicographically by path
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L2_005
+@pytest.mark.REQ_L2_003
 class TestEntrySorting:
     def test_sorted_entries(self, tmp_meshpack: str) -> None:
         """Entries must be sorted by path."""
@@ -189,10 +207,10 @@ class TestEntrySorting:
 
 
 # ---------------------------------------------------------------------------
-# REQ-L2-010: entries_count MUST match actual entry count
+# REQ-L2-002: generated shard_list entries_count MUST match actual entry count
 # ---------------------------------------------------------------------------
 
-@pytest.mark.REQ_L2_010
+@pytest.mark.REQ_L2_002
 class TestEntriesCount:
     def test_count_mismatch_error(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
         """Mismatched entries_count must produce an error."""
@@ -207,11 +225,71 @@ class TestEntriesCount:
             os.unlink(path)
 
 
+@pytest.mark.REQ_L2_002
+class TestManifestSummary:
+    def test_total_files_mismatch_error(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        pack_builder._manifest["index_summary"]["total_files"] = 999
+        path = pack_builder.build_to_file(path=path)
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "MAN-022" and "total_files" in f.message for f in errors)
+        finally:
+            os.unlink(path)
+
+    def test_total_size_mismatch_error(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        pack_builder._manifest["index_summary"]["total_size_bytes"] = 999
+        path = pack_builder.build_to_file(path=path)
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "MAN-022" and "total_size_bytes" in f.message for f in errors)
+        finally:
+            os.unlink(path)
+
+
+@pytest.mark.REQ_L1_010
+@pytest.mark.REQ_L2_002
+class TestShardManifestConsistency:
+    def test_unlisted_shard_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        rogue_shard = {
+            "shard_id": "part-00002",
+            "format_version": "2.0.0",
+            "entries_count": 0,
+            "entries_hash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "entries": [],
+        }
+        path = pack_builder.add_shard("part-00001", [minimal_valid_entry]).add_extra_file(
+            "index/part-00002.json",
+            json.dumps(rogue_shard).encode("utf-8"),
+        ).build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SHD-011" for f in errors)
+        finally:
+            os.unlink(path)
+
+    def test_shard_filename_id_mismatch_rejected(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        pack_builder.add_shard("part-00001", [minimal_valid_entry])
+        pack_builder._shards["part-00001"]["shard_id"] = "part-00002"
+        path = pack_builder.build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SHD-008" for f in errors)
+        finally:
+            os.unlink(path)
+
+
 # ---------------------------------------------------------------------------
 # REQ-L2-010: entries_hash MUST be verified using RFC 8785 (JCS)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.REQ_L2_010
+@pytest.mark.REQ_L2_011
 class TestEntriesHashRFC8785:
     """Verify that entries_hash uses RFC 8785 (JCS) canonical JSON."""
 
@@ -383,6 +461,49 @@ class TestResourceRefFormat:
         finally:
             os.unlink(path)
 
+    def test_resource_hash_mismatch_rejected(self, pack_builder: MeshPackBuilder) -> None:
+        """resource_hash must match the actual embedded resource bytes."""
+        resource_ref = "a" * 64 + ".png"
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": "sha256:" + "aa" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+            "resource_ref": resource_ref,
+            "resource_hash": "sha256:" + "00" * 32,
+            "resource_size_bytes": 3,
+        }
+        path = pack_builder.add_shard("part-00001", [entry]).add_resource(resource_ref, b"abc").build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "RES-005" for f in errors)
+        finally:
+            os.unlink(path)
+
+    def test_resource_size_mismatch_rejected(self, pack_builder: MeshPackBuilder) -> None:
+        """resource_size_bytes must match the actual embedded resource bytes."""
+        resource_ref = "a" * 64 + ".png"
+        digest = hashlib.sha256(b"abc").hexdigest()
+        entry = {
+            "path": "models/test.stl",
+            "original_name": "test.stl",
+            "size_bytes": 100,
+            "hash": "sha256:" + "aa" * 32,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+            "resource_ref": resource_ref,
+            "resource_hash": "sha256:" + digest,
+            "resource_size_bytes": 999,
+        }
+        path = pack_builder.add_shard("part-00001", [entry]).add_resource(resource_ref, b"abc").build_to_file()
+        try:
+            findings = validate(path)
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "RES-007" for f in errors)
+        finally:
+            os.unlink(path)
+
     @pytest.mark.parametrize(
         "resource_ref",
         [
@@ -415,6 +536,28 @@ class TestResourceRefFormat:
             os.unlink(path)
 
 
+@pytest.mark.REQ_L2_012
+@pytest.mark.REQ_L2_060
+class TestMappingDbIntegrity:
+    def test_mapping_db_bytes_are_included_in_sidecar_hash(self, pack_builder: MeshPackBuilder, minimal_valid_entry: dict) -> None:
+        """A sidecar hash computed without mapping.db must not verify an archive that contains it."""
+        without_mapping = pack_builder.add_shard("part-00001", [minimal_valid_entry]).build_to_file()
+        with open(without_mapping, "rb") as archive_file:
+            digest_without_mapping = hashlib.sha256(archive_file.read()).hexdigest()
+
+        path = pack_builder.add_extra_file("mapping.db", b"cache bytes").build_to_file(path=without_mapping)
+        sidecar_path = _write_sidecar(path, pack_hash=f"sha256:{digest_without_mapping}")
+
+        try:
+            findings = validate(path, schema_mode="strict")
+            errors = [f for f in findings if f.severity == Severity.ERROR]
+            assert any(f.code == "SDC-005" for f in errors)
+        finally:
+            os.unlink(path)
+            os.unlink(sidecar_path)
+
+
+@pytest.mark.REQ_L1_020
 class TestSchemaMode:
     def test_unknown_manifest_fields_warn_in_compat_mode(self, pack_builder: MeshPackBuilder) -> None:
         pack_builder.set_manifest_field("future_field", True)
@@ -437,6 +580,7 @@ class TestSchemaMode:
             os.unlink(path)
 
 
+@pytest.mark.REQ_L3_040
 class TestOfficialExtensionValidation:
     def test_valid_thumbnail_v2_extension_accepted(self, pack_builder: MeshPackBuilder) -> None:
         entry = {

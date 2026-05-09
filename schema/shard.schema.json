@@ -26,7 +26,7 @@
     },
     "creator_info": {
       "type": "object",
-      "description": "DEPRECATED: For backwards compatibility only. New implementations MUST omit this and rely on manifest.creator_info. Will be removed in format_version 2.0.0.",
+      "description": "DEPRECATED: For backwards compatibility only. New implementations MUST omit this and rely on manifest.creator_info. Retained in the 2.x schema line for legacy archives.",
       "deprecated": true,
       "properties": {
         "name": { "type": "string" },
@@ -128,7 +128,7 @@
         "metamodel_id": {
           "type": "string",
           "format": "uuid",
-          "description": "DEPRECATED: Single metamodel ID. Use 'metamodels' array for 1:N support. Kept for v1.0 backward compatibility; if both present, 'metamodels' takes precedence.",
+          "description": "DEPRECATED: Single metamodel ID. Use 'metamodels' array for 1:N support. Retained for legacy compatibility; if both present, 'metamodels' takes precedence.",
           "deprecated": true
         },
         "metamodel_role": {
@@ -196,7 +196,7 @@
             "_deleted": {
               "type": "boolean",
               "const": true,
-              "description": "DEPRECATED: Legacy delta pack deletion marker. Use 'operation: delete' instead. Kept for v1.0 backward compatibility.",
+              "description": "DEPRECATED: Legacy delta pack deletion marker. Use 'operation: delete' instead. Retained for legacy compatibility.",
               "deprecated": true
             }
           },

@@ -5,9 +5,9 @@ tags:
   - meshpack
   - data-interchange
 title: 'MeshPack (.meshpack) Standard Definition'
-status: draft
+status: release-candidate
 created_date: 2026-01-06
-updated_date: 2026-02-16
+updated_date: 2026-05-09
 author: Jordane Masson
 business_value: high
 risk_level: medium
@@ -77,7 +77,7 @@ Physically, a `.meshpack` file is a **ZIP archive** with a custom extension.
 > | Multiple snapshots/versions | No | Yes |
 > | Browser/WASM support | Yes | No |
 >
-> **Why ZIP for v1.0**: Browser compatibility (JSZip), universal tooling, industry precedent (3MF, XLSX, JAR).
+> **Why ZIP for v2.0**: Browser compatibility (JSZip), universal tooling, industry precedent (3MF, XLSX, JAR).
 
 ## 3. Internal Structure
 
@@ -123,7 +123,7 @@ The optional `mapping.db` SQLite file is a **local acceleration cache** for cons
 - Verifiers MUST include every archive byte in `pack_hash` computation
 - Consumers SHOULD regenerate `mapping.db` from shards if integrity is critical
 
-> **Implementation status**: As of v1.1, no standard tooling generates or
+> **Implementation status**: As of v2.0, no standard tooling generates or
 > consumes `mapping.db`. Implementers are NOT required to support it.
 > This feature MAY be promoted to a formal extension or removed in a future
 > major version.
@@ -148,7 +148,7 @@ The `manifest.json` file is the entry point for the package. It defines the owne
 
 ```json
 {
-  "format_version": "1.0.0",
+  "format_version": "2.0.0",
   "created_at": "2026-01-06T12:00:00Z",
   "workspace_id": "uuid-string",
   "ids": [
@@ -217,7 +217,7 @@ The `manifest.json` file is the entry point for the package. It defines the owne
     *   **`config`**: Configuration flags used during generation.
     *   **`partial`**: `true` for delta packs (see §11).
     *   **`base_pack_hash`**: Required when `partial=true`; the base pack this delta applies to.
-    *   **`metamodel_filter`** (v1.1+): Export filter for metamodel context. See schema for `mode`, `metamodel_ids`, `collapse_roles`.
+    *   **`metamodel_filter`**: Export filter for metamodel context. See schema for `mode`, `metamodel_ids`, `collapse_roles`.
 *   **`import_policy`**: Guidance for conflict handling when importing into another backend.
     *   **`id_conflict`**: `fail` | `skip` | `overwrite`
     *   **`metamodel_merge`**: `strict` | `merge` | `replace`
@@ -243,7 +243,7 @@ To handle libraries with hundreds of thousands of files without loading a monoli
 ```json
 {
   "shard_id": "part-00001",
-  "format_version": "1.0.0",
+  "format_version": "2.0.0",
   "entries_count": 10000,
   "entries_hash": "sha256:...",
   "entries": [
@@ -293,8 +293,8 @@ To handle libraries with hundreds of thousands of files without loading a monoli
 *   **`hash`** (REQUIRED): Content hash of the **original file on the source filesystem** using manifest's `hash_algo`. Format: `{algo}:{hex}`.
 *   **`modified_at`** (REQUIRED): ISO 8601 timestamp of last modification.
 *   **`ids`**: Namespaced identifiers for cross-system reconciliation (e.g., `meshsync:model`, `thingiverse:thing`).
-*   **`metamodels`** (v1.1+): Array of metamodel memberships. A file CAN belong to **multiple metamodels simultaneously**. Each entry specifies `id` (UUID) and `role` (`canonical` | `variant` | `accessory` | `doc`). Supersedes the deprecated single fields when present.
-*   **`metamodel_id` / `metamodel_role`** (DEPRECATED): Legacy single-metamodel fields for v1.0 compatibility. If `metamodels[]` is present, these are ignored.
+*   **`metamodels`**: Array of metamodel memberships. A file CAN belong to **multiple metamodels simultaneously**. Each entry specifies `id` (UUID) and `role` (`canonical` | `variant` | `accessory` | `doc`). Supersedes the deprecated single fields when present.
+*   **`metamodel_id` / `metamodel_role`** (DEPRECATED): Legacy single-metamodel fields retained for backward compatibility. If `metamodels[]` is present, these are ignored.
 *   **`assembly`**: Optional assembly graph info with transforms.
     *   **Transform Matrix Convention**: 4×4 homogeneous transformation matrix in **column-major order** (OpenGL/glTF convention). All transforms use the **canonical coordinate system: right-handed, +Y up**. If the source file uses a different `up_axis` (e.g., +Z for STL), the transform MUST be pre-converted to canonical +Y up. Scale is in the units specified by the entry's `units` field. Transform is **relative to parent assembly**, not absolute world space.
 *   **`operation`**: Delta pack operation type (`add` | `modify` | `delete`). Only present when `manifest.generation.partial=true`. `delete` entries MUST have `size_bytes=0` and `hash` set to all zeros. Supersedes the deprecated `extensions._deleted` marker.
@@ -410,7 +410,7 @@ Where canonical JSON follows [RFC 8785 (JSON Canonicalization Scheme)](https://w
 ### 8.6 Additional Integrity
 
 * **Shard hashes**: Each shard exposes `entries_hash`; manifest lists them in `shard_list` for cross-verification.
-* **Encryption**: Deferred to v1.1. When specified, it will be an official extension (`meshsync_encryption`) with algorithm, recipients, and encrypted-content scope. **Do not mix encrypted resources with plaintext indices.**
+* **Encryption**: Not part of MeshPack 2.0. When specified in a future version, it will be an official extension (`meshsync_encryption`) with algorithm, recipients, and encrypted-content scope. **Do not mix encrypted resources with plaintext indices.**
 
 ## 9. Usage Scenarios
 
@@ -465,7 +465,7 @@ Each `FileEntry` in a delta pack includes an explicit `operation` field:
 | **Deleted file** | `"delete"` | Entry with `size_bytes=0`, hash all zeros |
 | **Unchanged** | *(not present)* | Entry NOT present (inherited from base) |
 
-> **DEPRECATED**: The `extensions._deleted: true` marker from v1.0 is superseded by `operation: "delete"`. Implementations SHOULD accept both for backwards compatibility.
+> **DEPRECATED**: The legacy `extensions._deleted: true` marker is superseded by `operation: "delete"`. Implementations SHOULD accept both for backwards compatibility.
 
 ### 11.3 Merge Algorithm
 
@@ -479,7 +479,7 @@ Each `FileEntry` in a delta pack includes an explicit `operation` field:
 
 - Delta packs SHOULD NOT contain `resources/` for deleted files
 - A delta pack without a resolvable `base_pack_hash` is **invalid**
-- Chains of deltas (delta-of-delta) are NOT supported in v1.0; flatten before distribution
+- Chains of deltas (delta-of-delta) are NOT supported in MeshPack 2.0; flatten before distribution
 
 ---
 
@@ -509,14 +509,15 @@ Extension: `meshsync_geometry.v1`
 
 ### 12.2 Material & Texture Dependencies
 
-Extension: `meshsync_dependencies.v1`
+Extension: `meshsync_dependencies.v2`
 
 ```json
 "extensions": {
   "meshsync_dependencies": {
-    "v1": {
+    "v2": {
       "materials": ["materials/chrome.mtl"],
-      "textures": ["textures/diffuse.png", "textures/normal.png"]
+      "textures": ["textures/diffuse.png", "textures/normal.png"],
+      "references": ["parts/wheel.obj"]
     }
   }
 }
@@ -542,7 +543,7 @@ Extension: `meshsync_printability.v1`
 }
 ```
 
-### 12.4 AI-Enriched Content Metadata
+### 12.4 Rich Content Metadata
 
 Extension: `meshsync_content.v1`
 
@@ -550,12 +551,10 @@ Extension: `meshsync_content.v1`
 "extensions": {
   "meshsync_content": {
     "v1": {
-      "ai_generated_title": "Articulated Dragon Figurine",
-      "ai_generated_description": "A detailed...",
-      "ai_generated_tags": ["dragon", "fantasy"],
+      "title": "Articulated Dragon Figurine",
+      "description": "A detailed multi-part figurine prepared for marketplace display.",
       "language": "en",
-      "ai_model_version": "gpt-4o-2024-01",
-      "generation_timestamp": "2026-01-16T12:00:00Z"
+      "tags": ["dragon", "fantasy"]
     }
   }
 }

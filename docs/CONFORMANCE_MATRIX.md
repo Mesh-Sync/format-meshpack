@@ -17,7 +17,8 @@
 | Unsafe resource/preview ref rejection | Yes | Yes | Yes | Yes | Yes |
 | Detached sidecar pack hash | Yes | Yes | Yes | Yes | Yes |
 | Signature verification | Optional Python crypto | Ed25519/RSA-PSS-SHA256 | Ed25519 | Ed25519/RSA-PSS-SHA256 | Ed25519/RSA-PSS-SHA256 |
-| L1/L2 fixture parsing | Yes | Yes | Yes | Yes | Yes |
-| L3 sidecar/signature fixture validation | Yes | Yes | Yes | Yes | Yes |
+| Conformance fixture validation | Yes | Public sample parity | Generated smoke tests | Generated smoke tests | Generated smoke tests |
+| Generated SDK runtime parity tests | N/A | Public sample + unsafe resource refs | Sidecar + missing manifest + unsafe resource refs | Sidecar + missing manifest + unsafe resource refs | Sidecar + missing manifest + unsafe resource refs |
+| L3 signature conformance tests | Yes | Via reference test suite | Ed25519 API coverage | API coverage | API coverage |
 
-The generated SDKs provide validator APIs for core public-reader safety, BLAKE3 entry hashing, detached sidecar hash verification, and L3 signature verification. The Python reference validator remains the strict JSON Schema authority because generated SDKs deserialize typed models but do not implement full Draft-07 validation modes.
+The generated SDKs provide validator APIs for core public-reader safety, BLAKE3 entry hashing, detached sidecar hash verification, and signature verification hooks. The Python reference validator remains the strict JSON Schema authority because generated SDKs deserialize typed models but do not implement full Draft-07 validation modes.

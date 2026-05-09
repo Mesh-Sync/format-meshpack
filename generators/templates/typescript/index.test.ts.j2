@@ -1,0 +1,85 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import JSZip from "jszip";
+
+import { OSType, validateMeshPack, writeMeshPack, type FileEntry, type Manifest, type Shard } from "./index";
+
+const EMPTY_ENTRIES_HASH = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+
+function manifest(entriesCount = 0, entriesHash = EMPTY_ENTRIES_HASH): Manifest {
+  return {
+    format_version: "{{ version }}",
+    created_at: "2026-05-09T00:00:00Z",
+    creator_info: { name: "TypeScript SDK parity test" },
+    platform_info: { os: OSType.Linux, path_separator: "/", is_case_sensitive: true },
+    index_summary: { total_files: entriesCount, total_shards: 1, total_size_bytes: 0 },
+    hash_algo: "sha256",
+    shard_list: [{ id: "part-00001", entries_count: entriesCount, entries_hash: entriesHash }],
+  };
+}
+
+function shard(entries: FileEntry[] = [], entriesHash = EMPTY_ENTRIES_HASH): Shard {
+  return {
+    shard_id: "part-00001",
+    format_version: "{{ version }}",
+    entries_count: entries.length,
+    entries_hash: entriesHash,
+    entries,
+  };
+}
+
+function sidecarFor(archive: Uint8Array) {
+  const digest = createHash("sha256").update(archive).digest("hex");
+  return {
+    pack_name: "sdk-parity.mpack",
+    pack_size_bytes: archive.byteLength,
+    hash_algo: "sha256" as const,
+    pack_hash: `sha256:${digest}`,
+    computed_at: "2026-05-09T00:00:00Z",
+    signatures: [],
+  };
+}
+
+test("validator accepts a minimal archive with sidecar hash verification", async () => {
+  const archive = await writeMeshPack({ manifest: manifest(), shards: [shard()] });
+  const result = await validateMeshPack(archive, {
+    archiveName: "sdk-parity.mpack",
+    sidecar: sidecarFor(archive),
+  });
+
+  assert.equal(result.valid, true, JSON.stringify(result.findings));
+  assert.ok(result.findings.some((finding) => finding.code === "SDC-010"));
+});
+
+test("validator reports MAN-001 for archives without manifest.json", async () => {
+  const zip = new JSZip();
+  zip.file("index/part-00001.json", "{}");
+  const archive = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+
+  const result = await validateMeshPack(archive);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((finding) => finding.code === "MAN-001"));
+});
+
+test("validator reports RES-004 for unsafe resource_ref values", async () => {
+  const entry: FileEntry = {
+    path: "models/test.stl",
+    original_name: "test.stl",
+    size_bytes: 10,
+    hash: "sha256:" + "aa".repeat(32),
+    modified_at: "2026-05-09T00:00:00Z",
+    resource_ref: "../secret.png",
+    resource_hash: "sha256:" + "bb".repeat(32),
+  };
+  const archive = await writeMeshPack({
+    manifest: manifest(1, "sha256:" + "00".repeat(32)),
+    shards: [shard([entry], "sha256:" + "00".repeat(32))],
+  });
+
+  const result = await validateMeshPack(archive);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((finding) => finding.code === "RES-004"));
+});
