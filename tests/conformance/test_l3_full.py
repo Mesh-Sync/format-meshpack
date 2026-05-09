@@ -49,6 +49,7 @@ def _write_sidecar(path: str, sidecar: dict) -> str:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.REQ_L3_020
+@pytest.mark.REQ_L3_022
 class TestDeltaOperations:
     def test_operation_field_accepted(self, pack_builder: MeshPackBuilder) -> None:
         """Entries with 'operation' field should not produce errors."""

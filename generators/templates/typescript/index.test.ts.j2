@@ -6,6 +6,12 @@ import JSZip from "jszip";
 import { OSType, canonicalStringify, computeEntriesHash, validateMeshPack, writeMeshPack, type FileEntry, type Manifest, type Shard } from "./index";
 
 const EMPTY_ENTRIES_HASH = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+{% for vector in sdk_validation_vectors.vectors %}
+{% if vector.id == "jcs-utf16-key-order" %}
+const JCS_UTF16_VECTOR_ENTRY = {{ vector.entry_json }} as FileEntry;
+const JCS_UTF16_VECTOR_ENTRIES_HASH = "{{ vector.entries_hash }}";
+{% endif %}
+{% endfor %}
 
 function manifest(entriesCount = 0, entriesHash = EMPTY_ENTRIES_HASH, formatVersion = "{{ version }}"): Manifest {
   return {
@@ -125,4 +131,8 @@ test("entries_hash uses UTF-8 byte ordering for non-ASCII paths", () => {
   const expected = `sha256:${createHash("sha256").update(Buffer.from(canonical, "utf8")).digest("hex")}`;
 
   assert.equal(computeEntriesHash([unicodeEntry, asciiEntry]), expected);
+});
+
+test("entries_hash uses UTF-16 JCS key ordering", () => {
+  assert.equal(computeEntriesHash([JCS_UTF16_VECTOR_ENTRY]), JCS_UTF16_VECTOR_ENTRIES_HASH);
 });

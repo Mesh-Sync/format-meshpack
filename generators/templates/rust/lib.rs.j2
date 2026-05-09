@@ -602,7 +602,7 @@ fn canonical_json(value: &Value) -> String {
         Value::Array(items) => format!("[{}]", items.iter().map(canonical_json).collect::<Vec<_>>().join(",")),
         Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort_unstable();
+            keys.sort_unstable_by_key(|key| utf16_sort_key((*key).as_str()));
             let pairs = keys.into_iter().map(|key| {
                 format!("{}:{}", serde_json::to_string(key).unwrap_or_default(), canonical_json(&map[key]))
             }).collect::<Vec<_>>();
@@ -612,6 +612,10 @@ fn canonical_json(value: &Value) -> String {
             encoded
         }
     }
+}
+
+fn utf16_sort_key(value: &str) -> Vec<u16> {
+    value.encode_utf16().collect()
 }
 
 {% for ext in extensions %}
@@ -639,6 +643,12 @@ mod tests {
     use zip::write::FileOptions;
 
     const EMPTY_ENTRIES_HASH: &str = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+{% for vector in sdk_validation_vectors.vectors %}
+{% if vector.id == "jcs-utf16-key-order" %}
+    const JCS_UTF16_VECTOR_ENTRY_JSON: &str = r#"{{ vector.entry_json }}"#;
+    const JCS_UTF16_VECTOR_ENTRIES_HASH: &str = "{{ vector.entries_hash }}";
+{% endif %}
+{% endfor %}
 
     fn unique_path(name: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -765,5 +775,14 @@ mod tests {
         assert!(!result.is_valid());
         assert!(result.errors().iter().any(|finding| finding.code == "MAN-013"));
         let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn entries_hash_uses_utf16_jcs_key_order() {
+        let entry: Value = serde_json::from_str(JCS_UTF16_VECTOR_ENTRY_JSON).expect("parse JCS vector entry");
+
+        let actual = compute_entries_hash(&[entry], "sha256").expect("compute entries hash");
+
+        assert_eq!(JCS_UTF16_VECTOR_ENTRIES_HASH, actual);
     }
 }

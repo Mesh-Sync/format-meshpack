@@ -589,7 +589,18 @@ export function canonicalStringify(value: unknown): string {
     return `[${value.map((item) => canonicalStringify(item)).join(",")}]`;
   }
   const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(",")}}`;
+  return `{${Object.keys(record).sort(compareUtf16Key).map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(",")}}`;
+}
+
+function compareUtf16Key(left: string, right: string): number {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = left.charCodeAt(index) - right.charCodeAt(index);
+    if (diff !== 0) {
+      return diff;
+    }
+  }
+  return left.length - right.length;
 }
 
 export const ExtensionNames = {

@@ -394,6 +394,24 @@ class TestEntriesHashRFC8785:
         result = jcs_canonicalize(data)
         assert result == b'{"a":0,"z":{"a":1,"b":2}}'
 
+    def test_jcs_object_keys_sort_by_utf16_code_units(self) -> None:
+        """Supplementary-plane keys must sort by UTF-16 code units, not Unicode scalar value."""
+        data = {"\ue000": 2, "\U0001f600": 1}
+
+        result = jcs_canonicalize(data)
+
+        assert result == '{"\U0001f600":1,"\ue000":2}'.encode("utf-8")
+
+    def test_entries_hash_with_utf16_key_order_vector(self) -> None:
+        """Shared SDK vector: nested extension keys exercise RFC 8785 UTF-16 sorting."""
+        vector_path = os.path.join(os.path.dirname(__file__), "..", "sdk_validation_vectors.json")
+        with open(vector_path, "r", encoding="utf-8") as vector_file:
+            vector = json.load(vector_file)["vectors"][0]
+
+        ok, actual = verify_entries_hash([vector["entry"]], "sha256", vector["entries_hash"])
+
+        assert ok, f"Hash mismatch: expected {vector['entries_hash']}, got {actual}"
+
     def test_jcs_number_integer(self) -> None:
         """Integers must be rendered without decimal point."""
         assert _jcs_serialize_number(42) == "42"
@@ -499,6 +517,7 @@ class TestEntriesHashRFC8785:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.REQ_L2_020
+@pytest.mark.REQ_L2_021
 class TestResourceRefFormat:
     def test_colon_in_ref_warned(self, pack_builder: MeshPackBuilder) -> None:
         """resource_ref with colon (algo prefix) should produce a warning."""

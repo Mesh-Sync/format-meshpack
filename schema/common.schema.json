@@ -27,7 +27,7 @@
     },
     "semver": {
       "type": "string",
-      "description": "Semantic version string (MAJOR.MINOR.PATCH)",
+      "description": "MeshPack archive format version string (MAJOR.MINOR.PATCH). Prerelease and build metadata are not accepted in archive manifests or the repository VERSION source of truth.",
       "pattern": "^\\d+\\.\\d+\\.\\d+$"
     },
     "namespacedId": {

@@ -15,6 +15,7 @@ from generate_sdks import (
     snake_to_pascal,
     extract_extension_models,
     load_extension_schemas,
+    load_sdk_validation_vectors,
     load_version,
     MODEL_OUTPUTS,
 )
@@ -277,6 +278,22 @@ class TestGenerationReleaseReadiness:
         with pytest.raises(ValueError):
             load_version(str(version_file))
 
+    @pytest.mark.parametrize("version", ["2.0.0-rc.1", "2.0.0+build.1"])
+    def test_load_version_rejects_non_canonical_format_versions(self, tmp_path, version):
+        version_file = tmp_path / "VERSION"
+        version_file.write_text(version + "\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Invalid MeshPack format version"):
+            load_version(str(version_file))
+
+    def test_sdk_validation_vectors_are_loaded_for_generated_tests(self):
+        vectors = load_sdk_validation_vectors()
+
+        ids = {vector["id"] for vector in vectors["vectors"]}
+
+        assert "jcs-utf16-key-order" in ids
+        assert all("entry_json" in vector for vector in vectors["vectors"])
+
     def test_generator_schema_audit_accepts_current_schemas(self):
         audit_generator_inputs()
 
@@ -449,6 +466,25 @@ class TestGenerationReleaseReadiness:
 
         for marker in markers:
             assert marker in contents
+
+    @pytest.mark.parametrize(
+        "template_path",
+        [
+            ("typescript", "index.test.ts.j2"),
+            ("rust", "lib.rs.j2"),
+            ("java", "MeshPackTest.java.j2"),
+        ],
+    )
+    def test_sdk_templates_consume_shared_validation_vectors(self, template_path):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", *template_path),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        assert "jcs-utf16-key-order" in contents
+        assert "JCS_UTF16_VECTOR_ENTRIES_HASH" in contents
 
 
 class TestJavaSdkTarget:

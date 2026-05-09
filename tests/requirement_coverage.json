@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "coverage": {
+    "REQ-L1-001": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py"]
+    },
+    "REQ-L1-002": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py"]
+    },
+    "REQ-L1-003": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py", "tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L1-010": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py", "tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L1-011": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py"]
+    },
+    "REQ-L1-012": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py"]
+    },
+    "REQ-L1-013": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py"]
+    },
+    "REQ-L1-020": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L1-041": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py"]
+    },
+    "REQ-L2-000": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-001": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-002": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-003": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-004": {
+      "status": "schema-backed",
+      "evidence": ["schema/shard.schema.json", "tests/conformance/test_l1_minimal.py"],
+      "rationale": "The schemas and L1 entry-field tests enforce FileEntry shape; source-filesystem population is a writer responsibility outside the reference validator."
+    },
+    "REQ-L2-010": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py", "tests/sdk_validation_vectors.json"]
+    },
+    "REQ-L2-011": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-012": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py", "tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L2-013": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l1_minimal.py", "tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-020": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-021": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L2-030": {
+      "status": "schema-backed",
+      "evidence": ["schema/shard.schema.json", "tests/conformance/test_l1_minimal.py"],
+      "rationale": "The standard schemas and path-safety tests reject non-portable paths; OS-specific extraction behavior is implementation-specific."
+    },
+    "REQ-L2-060": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L3-001": {
+      "status": "schema-backed",
+      "evidence": ["schema/manifest.schema.json", "schema/shard.schema.json"],
+      "rationale": "Namespaced identifiers are represented in canonical schemas; identity reconciliation behavior belongs to consumers."
+    },
+    "REQ-L3-002": {
+      "status": "ecosystem-responsibility",
+      "evidence": ["definition/requirements/L3-full.md"],
+      "rationale": "Namespace lookup APIs are required of consuming implementations, not of this schema and validator package."
+    },
+    "REQ-L3-003": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L3-010": {
+      "status": "schema-backed",
+      "evidence": ["schema/shard.schema.json"],
+      "rationale": "Metamodel fields and enums are represented in the shard schema; grouping reconstruction is a consuming implementation concern."
+    },
+    "REQ-L3-011": {
+      "status": "schema-backed",
+      "evidence": ["schema/shard.schema.json"],
+      "rationale": "Assembly graph fields are represented in the shard schema; transform rendering and application are implementation concerns."
+    },
+    "REQ-L3-012": {
+      "status": "ecosystem-responsibility",
+      "evidence": ["definition/requirements/L3-full.md"],
+      "rationale": "Assembly tree APIs are required of viewers/importers and are outside this format validator package."
+    },
+    "REQ-L3-020": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L3-021": {
+      "status": "ecosystem-responsibility",
+      "evidence": ["definition/requirements/L3-full.md"],
+      "rationale": "Delta merge APIs require base-pack state management and are outside this validator and SDK generation package."
+    },
+    "REQ-L3-022": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L3-030": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L3-031": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L3-040": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l2_standard.py"]
+    },
+    "REQ-L3-041": {
+      "status": "generator-backed",
+      "evidence": ["generators/templates/python/extensions.py.j2", "generators/templates/typescript/index.ts.j2"],
+      "rationale": "Generated SDK extension helpers select versioned extension payloads; full per-application version policy remains consumer-specific."
+    },
+    "REQ-L3-042": {
+      "status": "tested",
+      "evidence": ["tests/conformance/test_l3_full.py"]
+    },
+    "REQ-L3-060": {
+      "status": "ecosystem-responsibility",
+      "evidence": ["definition/requirements/L3-full.md"],
+      "rationale": "Backend export completeness requires MeshSync backend data and is validated in backend integration suites, not this standard package."
+    },
+    "REQ-L3-061": {
+      "status": "ecosystem-responsibility",
+      "evidence": ["definition/requirements/L3-full.md", "schema/common.schema.json"],
+      "rationale": "Import conflict behavior is executed by backend importers; this repository defines the import_policy schema values."
+    },
+    "REQ-L3-070": {
+      "status": "scale-manual",
+      "evidence": ["definition/requirements/L3-full.md", "docs/RELEASE.md"],
+      "rationale": "Large archive and ZIP64 behavior requires long-running scale fixtures that are not part of the default public release gate."
+    }
+  }
+}

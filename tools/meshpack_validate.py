@@ -75,6 +75,10 @@ def _path_sort_key(path: object) -> bytes:
     return str(path).encode("utf-8")
 
 
+def _jcs_key_sort_key(key: object) -> bytes:
+    return str(key).encode("utf-16-be")
+
+
 def _load_schema(filename: str) -> dict:
     with open(os.path.join(SCHEMA_DIR, filename), "r", encoding="utf-8") as schema_file:
         return json.load(schema_file)
@@ -205,7 +209,7 @@ def _jcs_serialize_value(value: object) -> str:
         return "[" + ",".join(_jcs_serialize_value(v) for v in value) + "]"
     if isinstance(value, dict):
         # RFC 8785 §3.2.3: sort keys by UTF-16 code unit order
-        sorted_keys = sorted(value.keys())
+        sorted_keys = sorted(value.keys(), key=_jcs_key_sort_key)
         pairs = [_jcs_serialize_string(k) + ":" + _jcs_serialize_value(value[k])
                  for k in sorted_keys]
         return "{" + ",".join(pairs) + "}"

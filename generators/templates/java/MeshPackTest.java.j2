@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Method;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.zip.ZipEntry;
@@ -16,6 +17,14 @@ import org.junit.jupiter.api.Test;
 
 class MeshPackTest {
   private static final String EMPTY_ENTRIES_HASH = "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+{% for vector in sdk_validation_vectors.vectors %}
+{% if vector.id == "jcs-utf16-key-order" %}
+  private static final String JCS_UTF16_VECTOR_ENTRY_JSON = """
+      {{ vector.entry_json }}
+      """;
+  private static final String JCS_UTF16_VECTOR_ENTRIES_HASH = "{{ vector.entries_hash }}";
+{% endif %}
+{% endfor %}
 
   @Test
   void readerAcceptsWireEnumsAndUnknownFields() throws Exception {
@@ -170,6 +179,16 @@ class MeshPackTest {
     } finally {
       Files.deleteIfExists(archive);
     }
+  }
+
+  @Test
+  void entriesHashUsesUtf16JcsKeyOrder() throws Exception {
+    Method method = MeshPack.class.getDeclaredMethod("computeEntriesHash", String.class, String.class);
+    method.setAccessible(true);
+
+    String actual = (String) method.invoke(null, "{\"entries\":[" + JCS_UTF16_VECTOR_ENTRY_JSON.trim() + "]}", "sha256");
+
+    assertEquals(JCS_UTF16_VECTOR_ENTRIES_HASH, actual);
   }
 
   private static String manifest(int entriesCount, String entriesHash) {

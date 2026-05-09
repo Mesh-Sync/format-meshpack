@@ -511,7 +511,7 @@ Object
     List<String> keys = new ArrayList<>();
     Iterator<String> iterator = node.fieldNames();
     iterator.forEachRemaining(keys::add);
-    keys.sort(String::compareTo);
+    keys.sort(MeshPack::compareUtf16);
     List<String> pairs = new ArrayList<>();
     for (String key : keys) {
       try {
@@ -521,6 +521,10 @@ Object
       }
     }
     return "{" + String.join(",", pairs) + "}";
+  }
+
+  private static int compareUtf16(String left, String right) {
+    return left.compareTo(right);
   }
 
   private static int compareUtf8(String left, String right) {

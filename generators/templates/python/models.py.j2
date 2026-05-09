@@ -103,6 +103,10 @@ def _path_sort_key(path: Any) -> bytes:
     return str(path).encode("utf-8")
 
 
+def _jcs_key_sort_key(key: Any) -> bytes:
+    return str(key).encode("utf-16-be")
+
+
 def _canonical_json(value: Any) -> str:
     if value is None:
         return "null"
@@ -119,7 +123,7 @@ def _canonical_json(value: Any) -> str:
     if isinstance(value, dict):
         return "{" + ",".join(
             json.dumps(str(key), ensure_ascii=False) + ":" + _canonical_json(value[key])
-            for key in sorted(value.keys())
+            for key in sorted(value.keys(), key=_jcs_key_sort_key)
         ) + "}"
     raise TypeError(f"Unsupported JSON value for canonicalization: {type(value)!r}")
 

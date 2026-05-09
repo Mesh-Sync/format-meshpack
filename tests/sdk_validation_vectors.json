@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "id": "jcs-utf16-key-order",
+      "description": "entries_hash vector whose nested object keys differ between Unicode scalar-value order and RFC 8785 UTF-16 code-unit order",
+      "entry": {
+        "path": "models/jcs-vector.stl",
+        "original_name": "jcs-vector.stl",
+        "size_bytes": 1,
+        "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "modified_at": "2026-05-09T00:00:00Z",
+        "extensions": {
+          "\ue000": {
+            "rank": 2
+          },
+          "\ud83d\ude00": {
+            "rank": 1
+          }
+        }
+      },
+      "entries_hash": "sha256:f71fce534643b626a57c5c78ca1827815b2ee65991cd8fc0182ad3261ed402c9"
+    }
+  ]
+}

@@ -28,6 +28,7 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
 - **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas for Python, Rust, TypeScript, and Java 17+.
 - **[`tools/`](tools/)**: Standalone tools (`meshpack_validate.py` — archive validator with JSON Schema modes, JCS, signature, and path/resource safety checks).
 - **[`tests/conformance/`](tests/conformance/)**: Conformance test suite (L1/L2/L3) with static fixture archives.
+- **[`tests/sdk_validation_vectors.json`](tests/sdk_validation_vectors.json)**: Shared validation vectors consumed by generated SDK tests.
 - **[`samples/`](samples/)**: Example manifest and shard JSON files.
 - **[`docs/`](docs/)**: Release, schema hosting, conformance, validation, SDK quickstart, and additional reference documents.
 - **[`generated/`](generated/)**: (Gitignored) The output directory for generated SDKs.
@@ -77,6 +78,8 @@ python3 tools/meshpack_validate.py sample.meshpack --schema-mode strict
 ```
 
 `compat` mode is the default and reports unknown schema properties as warnings for forward-compatible inspection. `strict` mode treats unknown properties as errors and is the recommended release gate.
+
+Archive `format_version` values use canonical `MAJOR.MINOR.PATCH` only. Requirement evidence is tracked in [docs/REQUIREMENT_COVERAGE.md](docs/REQUIREMENT_COVERAGE.md), with explicit notes where L3 behavior is owned by consuming ecosystem implementations rather than this schema/SDK package.
 
 ## Contributing
 

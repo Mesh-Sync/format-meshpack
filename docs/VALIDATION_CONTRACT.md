@@ -52,7 +52,7 @@ The CLI flag is `--schema-mode compat|strict`. The separate `--strict` flag stil
 
 ## Format Version Compatibility
 
-Validators for MeshPack 2.x must reject future-major archives before treating the manifest as compatible. A `format_version` that is not SemVer produces `MAN-011`; a SemVer value with a major version greater than the validator's supported major version produces `MAN-013` as an error.
+Validators for MeshPack 2.x must reject future-major archives before treating the manifest as compatible. MeshPack archive `format_version` values use canonical `MAJOR.MINOR.PATCH` only; prerelease and build metadata are not accepted in manifests or the repository `VERSION` file. A value outside that shape produces `MAN-011`; a value with a major version greater than the validator's supported major version produces `MAN-013` as an error.
 
 Minor and patch versions within the supported major line remain forward-compatible unless another validation rule fails.
 
@@ -60,7 +60,7 @@ Minor and patch versions within the supported major line remain forward-compatib
 
 Public L2 archives are expected to include human-readable README entries at `/_README.md`, `/index/_README.md`, and `/resources/_README.md` when embedded resources are present. Missing README entries emit `LAY-001` through `LAY-003` warnings. README files must use LF line endings; CRLF or CR emits `LAY-004` as an error.
 
-Path ordering and `entries_hash` canonicalization are defined by UTF-8 byte order, not locale collation.
+Path ordering and `entries_hash` canonicalization are defined by UTF-8 byte order for entry paths and RFC 8785 UTF-16 code-unit ordering for JSON object keys. The shared vector file [tests/sdk_validation_vectors.json](../tests/sdk_validation_vectors.json) includes a supplementary-plane key-order case that all generated SDK test suites consume.
 
 ## Resource References
 

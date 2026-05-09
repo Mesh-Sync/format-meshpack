@@ -21,7 +21,10 @@
 | Detached sidecar pack hash | Yes | Yes | Yes | Yes | Yes |
 | Signature verification | Optional Python crypto | Ed25519/RSA-PSS-SHA256 | Ed25519 | Ed25519/RSA-PSS-SHA256 | Ed25519/RSA-PSS-SHA256 |
 | Conformance fixture validation | Yes | Public sample parity | Generated smoke tests | Generated smoke tests | Generated smoke tests |
-| Generated SDK runtime parity tests | N/A | Public sample + unsafe resource refs + future-major versions | Sidecar + missing manifest + unsafe resource refs + future-major versions | Sidecar + missing manifest + unsafe resource refs + future-major versions | Sidecar + missing manifest + unsafe resource refs + future-major versions |
+| Shared SDK validation vectors | Authoritative | JCS UTF-16 key-order vector | JCS UTF-16 key-order vector | JCS UTF-16 key-order vector | JCS UTF-16 key-order vector |
+| Generated SDK runtime parity tests | N/A | Public sample + unsafe resource refs + future-major versions + shared JCS vector | Sidecar + missing manifest + unsafe resource refs + future-major versions + shared JCS vector | Sidecar + missing manifest + unsafe resource refs + future-major versions + shared JCS vector | Sidecar + missing manifest + unsafe resource refs + future-major versions + shared JCS vector |
 | L3 signature conformance tests | Yes | Via reference test suite | Ed25519 API coverage | API coverage | API coverage |
 
 The generated SDKs provide validator APIs for core public-reader safety, BLAKE3 entry hashing, detached sidecar hash verification, and signature verification hooks. The Python reference validator remains the strict JSON Schema authority because generated SDKs deserialize typed models but do not implement full Draft-07 validation modes.
+
+Requirement traceability is tracked in [docs/REQUIREMENT_COVERAGE.md](REQUIREMENT_COVERAGE.md). That map is the source of truth for which MUST requirements are automated here, schema-backed here, or delegated to consuming MeshSync ecosystem implementations.

@@ -83,7 +83,7 @@ class MeshPackBuilder:
     def _compute_entries_hash(self, entries: List[Dict[str, Any]]) -> str:
         """Compute entries_hash per REQ-L2-010 using RFC 8785 (JCS)."""
         algo = self._manifest.get("hash_algo", "sha256")
-        sorted_entries = sorted(entries, key=lambda e: e.get("path", ""))
+        sorted_entries = sorted(entries, key=lambda e: str(e.get("path", "")).encode("utf-8"))
         encoded = jcs_canonicalize(sorted_entries)
         try:
             digest = compute_digest([encoded], algo)

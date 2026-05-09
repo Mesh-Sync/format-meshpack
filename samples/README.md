@@ -7,10 +7,13 @@ This directory contains example `.mpack` files for testing and validation.
 ### test-workspace.mpack
 
 - **Files:** 17
-- **Total Size:** 3,179,581 bytes
+- **Indexed source size:** 3,179,581 bytes (`manifest.index_summary.total_size_bytes`)
+- **Archive byte size:** recorded in `test-workspace.mpack.integrity#pack_size_bytes`
 - **Format:** MeshPack v2.0.0
 - **Contents:** 3D models (OBJ, STL), media files, nested structures
 - **Integrity sidecar:** `test-workspace.mpack.integrity` with authoritative SHA-256 pack hash
+
+The indexed source size is the sum of `FileEntry.size_bytes` values. It is intentionally distinct from the `.mpack` archive byte size used by the detached integrity sidecar.
 
 ## Usage
 

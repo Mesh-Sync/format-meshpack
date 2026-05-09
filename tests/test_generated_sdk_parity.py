@@ -14,6 +14,7 @@ from tests.conformance.conftest import MeshPackBuilder
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_SDK = REPO_ROOT / "generated" / "sdks" / "python"
 SAMPLE = REPO_ROOT / "samples" / "test-workspace.mpack"
+SDK_VALIDATION_VECTORS = REPO_ROOT / "tests" / "sdk_validation_vectors.json"
 
 
 def _import_python_sdk():
@@ -31,6 +32,17 @@ def _codes(findings, severity: str | None = None) -> set[str]:
         for finding in findings
         if severity is None or finding.severity == severity
     }
+
+
+def _load_vector(vector_id: str) -> dict:
+    import json
+
+    with open(SDK_VALIDATION_VECTORS, "r", encoding="utf-8") as vector_file:
+        vectors = json.load(vector_file)["vectors"]
+    for vector in vectors:
+        if vector["id"] == vector_id:
+            return vector
+    raise AssertionError(f"SDK validation vector not found: {vector_id}")
 
 
 def test_generated_python_validator_matches_reference_on_public_sample() -> None:
@@ -87,3 +99,23 @@ def test_generated_python_validator_matches_reference_on_future_major() -> None:
 
     assert "MAN-013" in _codes(reference_findings, "ERROR")
     assert "MAN-013" in _codes(sdk_result.findings, "ERROR")
+
+
+def test_generated_python_validator_matches_reference_on_jcs_utf16_vector() -> None:
+    sdk = _import_python_sdk()
+    vector = _load_vector("jcs-utf16-key-order")
+    pack = MeshPackBuilder().add_shard(
+        "part-00001",
+        [vector["entry"]],
+        entries_count=1,
+        entries_hash=vector["entries_hash"],
+    ).build_to_file()
+
+    try:
+        reference_findings = validate(pack)
+        sdk_result = sdk.validate_meshpack(pack)
+    finally:
+        os.unlink(pack)
+
+    assert "SHD-007" not in _codes(reference_findings, "ERROR")
+    assert "SHD-007" not in _codes(sdk_result.findings, "ERROR")

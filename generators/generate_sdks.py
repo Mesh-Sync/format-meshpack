@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(BASE_DIR)
 VERSION_FILE = os.path.join(REPO_DIR, "VERSION")
+SDK_VALIDATION_VECTORS_FILE = os.path.join(REPO_DIR, "tests", "sdk_validation_vectors.json")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 OUTPUT_DIR = os.path.join(REPO_DIR, "generated", "sdks")
 SCHEMA_DIR = os.path.join(REPO_DIR, "schema")
@@ -60,9 +61,27 @@ def load_schema(filename: str) -> Dict[str, Any]:
 def load_version(version_file: str = VERSION_FILE) -> str:
     with open(version_file, "r", encoding="utf-8") as file:
         version = file.read().strip()
-    if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
-        raise ValueError(f"Invalid SemVer in {version_file}: {version!r}")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError(f"Invalid MeshPack format version in {version_file}: {version!r}")
     return version
+
+
+def load_sdk_validation_vectors(path: str = SDK_VALIDATION_VECTORS_FILE) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as vectors_file:
+        data = json.load(vectors_file)
+
+    vectors = []
+    for vector in data.get("vectors", []):
+        normalized = dict(vector)
+        normalized["entry_json"] = json.dumps(
+            vector["entry"],
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        vectors.append(normalized)
+
+    return {"version": data.get("version"), "vectors": vectors}
 
 
 def _schema_pointer_get(schema: Dict[str, Any], pointer: str) -> Any:
@@ -528,6 +547,7 @@ def main() -> None:
         "format_major": int(version.split(".", 1)[0]),
         "models": all_models,
         "extensions": extensions,
+        "sdk_validation_vectors": load_sdk_validation_vectors(),
         "java_package": "net.meshsync.meshpack",
     }
 
