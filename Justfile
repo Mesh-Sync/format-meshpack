@@ -9,19 +9,29 @@ default: help
 
 help:
     @echo "Available commands:"
-    @echo "  generate       Generate client libraries (Python, Rust, TS) from templates"
+    @echo "  generate       Generate client libraries (Python, Rust, TypeScript, Java 17) from templates"
+    @echo "  check-version  Verify generated package versions match VERSION"
+    @echo "  determinism-check  Verify generated SDK output is deterministic"
     @echo "  validate       Check schema validity (requires 'check-jsonschema')"
     @echo "  compile        Build packages for all languages"
     @echo "  doc            Generate PDF documentation (requires 'pandoc')"
-    @echo "  lint           Run code linters (Python, Rust, TS)"
-    @echo "  test           Run tests (Python, Rust, TS)"
+    @echo "  lint           Run code linters (Python, Rust, TypeScript, Java)"
+    @echo "  test           Run tests (Python, Rust, TypeScript, Java)"
     @echo "  publish        Generate, Validate, Compile, Test, Lint and Upload"
     @echo "  publish-dry-run  Full pipeline without uploading (local verification)"
-    @echo "  all            Run compile sequence"
+    @echo "  all            Run generate, validate, lint, test, and compile"
 
 generate:
     @echo "Generating SDKs..."
     python3 generators/generate_sdks.py
+
+check-version:
+    @echo "Checking generated SDK versions..."
+    python3 tools/check_generated_versions.py
+
+determinism-check:
+    @echo "Checking deterministic generation..."
+    python3 tools/check_generation_determinism.py
 
 generate-fixtures:
     @echo "Generating static test fixtures..."
@@ -51,44 +61,43 @@ compile:
     # Ensure build is installed: pip install build
     cd generated/sdks/python && python3 -m build
     @echo "Compiling Rust..."
-    if command -v cargo >/dev/null 2>&1; then \
-        cd generated/sdks/rust/meshpack && cargo build --release; \
-    else \
-        echo "Warning: 'cargo' not found in PATH. Skipping Rust compilation."; \
-    fi
+    command -v cargo >/dev/null 2>&1
+    cd generated/sdks/rust/meshpack && cargo build --release
     @echo "Compiling TypeScript..."
-    if command -v npm >/dev/null 2>&1; then \
-        cd generated/sdks/typescript && npm install && npm run build; \
-    else \
-        echo "Warning: 'npm' not found in PATH. Skipping TypeScript compilation."; \
-    fi
+    command -v npm >/dev/null 2>&1
+    cd generated/sdks/typescript && npm install && npm run build
+    @echo "Compiling Java 17..."
+    command -v mvn >/dev/null 2>&1
+    cd generated/sdks/java/meshpack && mvn -q package
 
 lint:
     @echo "Linting Python..."
     flake8 generators/
     # mypy generators/ # Enable when typed
     @echo "Linting Rust..."
-    if command -v cargo >/dev/null 2>&1; then \
-        cd generated/sdks/rust/meshpack && cargo clippy; \
-    fi
+    command -v cargo >/dev/null 2>&1
+    cd generated/sdks/rust/meshpack && cargo clippy --all-targets
     @echo "Linting TypeScript..."
-    if command -v npm >/dev/null 2>&1; then \
-        cd generated/sdks/typescript && npm run lint; \
-    fi
+    command -v npm >/dev/null 2>&1
+    cd generated/sdks/typescript && npm install && npm run lint
+    @echo "Checking Java 17 compile..."
+    command -v mvn >/dev/null 2>&1
+    cd generated/sdks/java/meshpack && mvn -q -DskipTests compile
 
 test:
-    @echo "Running conformance tests..."
-    pytest tests/conformance/ -v --tb=short
+    @echo "Running Python tests..."
+    pytest tests/ -v --tb=short
     @echo "Testing Rust..."
-    if command -v cargo >/dev/null 2>&1; then \
-        cd generated/sdks/rust/meshpack && cargo test; \
-    fi
+    command -v cargo >/dev/null 2>&1
+    cd generated/sdks/rust/meshpack && cargo test
     @echo "Testing TypeScript..."
-    if command -v npm >/dev/null 2>&1; then \
-        cd generated/sdks/typescript && npm test; \
-    fi
+    command -v npm >/dev/null 2>&1
+    cd generated/sdks/typescript && npm install && npm test
+    @echo "Testing Java 17..."
+    command -v mvn >/dev/null 2>&1
+    cd generated/sdks/java/meshpack && mvn -q test
 
-publish: generate validate lint test compile
+publish: generate check-version validate lint test compile
     @echo "Publishing..."
     @echo "Please configure your registry credentials to publish."
     # Python
@@ -98,7 +107,7 @@ publish: generate validate lint test compile
     # TypeScript
     # npm publish
 
-publish-dry-run: generate validate lint test compile
+publish-dry-run: generate check-version determinism-check validate lint test compile
     @echo "Dry-run: packing artifacts (no upload)..."
     @echo "--- Python ---"
     cd generated/sdks/python && python3 -m build
@@ -107,12 +116,12 @@ publish-dry-run: generate validate lint test compile
         cd generated/sdks/typescript && npm pack --dry-run; \
     fi
     @echo "--- Rust ---"
-    if command -v cargo >/dev/null 2>&1; then \
-        cd generated/sdks/rust/meshpack && cargo package --list; \
-    fi
+    cd generated/sdks/rust/meshpack && cargo package --list
+    @echo "--- Java ---"
+    cd generated/sdks/java/meshpack && mvn -q package
     @echo "Dry-run complete. Review output above before tagging a release."
 
-all: generate validate compile
+all: generate check-version determinism-check validate lint test compile
 
 clean:
     rm -rf generated/

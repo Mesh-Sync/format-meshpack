@@ -1,7 +1,25 @@
+import { createHash } from 'crypto';
 import JSZip from 'jszip';
 
-// Version: {{ version }}
+export const VERSION = "{{ version }}";
 
+{% macro ts_base(t) -%}
+{%- if t.is_array -%}
+{{ ts_base(t.item_type) }}[]
+{%- elif t.base == "string" or t.base == "email" or t.base == "datetime" -%}
+string
+{%- elif t.base == "integer" or t.base == "number" -%}
+number
+{%- elif t.base == "boolean" -%}
+boolean
+{%- elif t.base == "dictionary" -%}
+Record<string, unknown>
+{%- elif t.base == "unknown" -%}
+unknown
+{%- else -%}
+{{ t.base }}
+{%- endif -%}
+{%- endmacro %}
 {% for model in models %}
 {% if model.name == "OSType" %}
 export enum OSType {
@@ -10,276 +28,390 @@ export enum OSType {
   Darwin = "darwin",
   Unknown = "unknown",
 }
+
 {% else %}
 export interface {{ model.name }} {
 {% for field in model.fields %}
-  {% if field.required == false %}
-  {{ field.name }}?: 
-  {% else %}
-  {{ field.name }}: 
-  {% endif %}
-  {%- if field.type.is_array -%}
-  {{ field.type.item_type.base }}[]
-  {%- elif field.type.base == "string" -%}
-  string
-  {%- elif field.type.base == "integer" -%}
-  number
-  {%- elif field.type.base == "boolean" -%}
-  boolean
-  {%- elif field.type.base == "datetime" -%}
-  string
-  {%- elif field.type.base == "email" -%}
-  string
-  {%- elif field.type.base == "dictionary" -%}
-  Record<string, any>
-  {%- else -%}
-  {{ field.type.base }}
-  {%- endif -%};
+  {{ field.name }}{% if not field.required %}?{% endif %}: {% if field.nullable and field.required %}{{ ts_base(field.type) }} | null{% else %}{{ ts_base(field.type) }}{% endif %};
 {% endfor %}
 }
+
 {% endif %}
 {% endfor %}
+export type HashAlgorithm = "sha256" | "sha512" | "blake3";
 
-export class MeshPackReader {
-    private zip: JSZip;
-    private manifest: Manifest | null = null;
-    private fileMap: Map<string, FileEntry> = new Map();
-    private loaded: boolean = false;
-
-    constructor() {
-        this.zip = new JSZip();
-    }
-
-    async loadAsync(data: ArrayBuffer | Uint8Array): Promise<void> {
-        if (this.loaded) return;
-
-        await this.zip.loadAsync(data);
-        
-        // Manifest
-        const manifestFile = this.zip.file("manifest.json");
-        if (manifestFile) {
-            const content = await manifestFile.async("string");
-            this.manifest = JSON.parse(content) as Manifest;
-        }
-
-        // Shards
-        const shardFiles = this.zip.file(/index\/.*\.json/);
-        for (const f of shardFiles) {
-            const content = await f.async("string");
-            const shard = JSON.parse(content) as Shard;
-            for (const entry of shard.entries) {
-                this.fileMap.set(entry.path, entry);
-            }
-        }
-        
-        this.loaded = true;
-    }
-
-    getManifest(): Manifest | null {
-        return this.manifest;
-    }
-
-    getFileEntry(path: string): FileEntry | undefined {
-        return this.fileMap.get(path);
-    }
-    
-    getModelsInstances(): FileEntry[] {
-        const modelExts = [".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"];
-        return this.listByExtension(modelExts);
-    }
-
-    /**
-     * Reads the binary content of the associated resource.
-     * @param entry The FileEntry to read the resource for.
-     * @param type The output type format ("blob", "arraybuffer", "uint8array", etc). Defaults to "blob".
-     */
-    async readResourceAsync(entry: FileEntry, type: "blob" | "arraybuffer" | "uint8array" | "string" = "blob"): Promise<any> {
-        if (!entry.resource_ref) return null;
-        
-        const path = `resources/${entry.resource_ref}`;
-        const file = this.zip.file(path);
-        
-        if (!file) return null;
-        return await file.async(type);
-    }
-
-    /**
-     * Find files by exact content hash.
-     */
-    getFilesByHash(hash: string): FileEntry[] {
-        return Array.from(this.fileMap.values()).filter(f => f.hash === hash);
-    }
-
-    /**
-     * List files matching specific extensions (case-insensitive).
-     * @param extensions List of extensions with dot (e.g. [".jpg", ".png"])
-     */
-    listByExtension(extensions: string[]): FileEntry[] {
-        const normalized = extensions.map(e => e.toLowerCase());
-        return Array.from(this.fileMap.values()).filter(f => {
-             const lower = f.path.toLowerCase();
-             return normalized.some(ext => lower.endsWith(ext));
-        });
-    }
-
-    /**
-     * Checks if all resource_ref pointers exist in the archive.
-     * Returns list of paths with missing resources.
-     */
-    validateIntegrity(): string[] {
-        const missing: string[] = [];
-        for (const entry of this.fileMap.values()) {
-            if (entry.resource_ref) {
-                const path = `resources/${entry.resource_ref}`;
-                if (!this.zip.file(path)) {
-                    missing.push(entry.path);
-                }
-            }
-        }
-        return missing;
-    }
+export interface MeshPackDocument {
+  manifest: Manifest;
+  shards: Shard[];
+  entries: FileEntry[];
 }
 
-// ================== Extension Helpers ==================
+export interface MeshPackValidationResult {
+  valid: boolean;
+  findings: MeshPackValidationFinding[];
+  errors: MeshPackValidationFinding[];
+  warnings: MeshPackValidationFinding[];
+}
 
-/**
- * Extension names supported by MeshSync
- */
+export interface MeshPackValidationFinding {
+  severity: "ERROR" | "WARNING" | "INFO";
+  code: string;
+  message: string;
+}
+
+export interface WriteMeshPackInput {
+  manifest: Manifest;
+  shards: Shard[];
+  resources?: Record<string, Uint8Array | ArrayBuffer | string>;
+}
+
+export class MeshPackReader {
+  private zip: JSZip = new JSZip();
+  private manifest: Manifest | null = null;
+  private shards: Shard[] = [];
+  private fileMap: Map<string, FileEntry> = new Map();
+  private loaded = false;
+
+  async loadAsync(data: ArrayBuffer | Uint8Array): Promise<void> {
+    if (this.loaded) {
+      return;
+    }
+
+    await this.zip.loadAsync(data);
+    const manifestFile = this.zip.file("manifest.json");
+    if (!manifestFile) {
+      throw new Error("manifest.json not found in archive");
+    }
+
+    this.manifest = JSON.parse(await manifestFile.async("string")) as Manifest;
+
+    const shardFiles = this.zip.file(/^index\/.*\.json$/).sort((a, b) => a.name.localeCompare(b.name));
+    for (const shardFile of shardFiles) {
+      const shard = JSON.parse(await shardFile.async("string")) as Shard;
+      this.shards.push(shard);
+      for (const entry of shard.entries) {
+        this.fileMap.set(entry.path, entry);
+      }
+    }
+
+    this.loaded = true;
+  }
+
+  getManifest(): Manifest | null {
+    return this.manifest;
+  }
+
+  getShards(): Shard[] {
+    return [...this.shards];
+  }
+
+  getEntries(): FileEntry[] {
+    return Array.from(this.fileMap.values());
+  }
+
+  getFileEntry(path: string): FileEntry | undefined {
+    return this.fileMap.get(path);
+  }
+
+  listModelEntries(): FileEntry[] {
+    return listModelEntries(this.getEntries());
+  }
+
+  getFilesByHash(hash: string): FileEntry[] {
+    return this.getEntries().filter((entry) => entry.hash === hash);
+  }
+
+  listByExtension(extensions: string[]): FileEntry[] {
+    const normalized = extensions.map((extension) => extension.toLowerCase());
+    return this.getEntries().filter((entry) => {
+      const lower = entry.path.toLowerCase();
+      return normalized.some((extension) => lower.endsWith(extension));
+    });
+  }
+
+  async readResourceAsync(entry: FileEntry, type: "arraybuffer" | "uint8array" | "string" = "uint8array"): Promise<ArrayBuffer | Uint8Array | string | null> {
+    if (!entry.resource_ref) {
+      return null;
+    }
+    const file = this.zip.file(`resources/${entry.resource_ref}`);
+    return file ? file.async(type) : null;
+  }
+
+  validateIntegrity(): string[] {
+    const missing: string[] = [];
+    for (const entry of this.fileMap.values()) {
+      if (entry.resource_ref && !this.zip.file(`resources/${entry.resource_ref}`)) {
+        missing.push(entry.path);
+      }
+    }
+    return missing;
+  }
+}
+
+export async function readMeshPack(data: ArrayBuffer | Uint8Array): Promise<MeshPackDocument> {
+  const reader = new MeshPackReader();
+  await reader.loadAsync(data);
+  const manifest = reader.getManifest();
+  if (!manifest) {
+    throw new Error("manifest.json not loaded");
+  }
+  return {
+    manifest,
+    shards: reader.getShards(),
+    entries: reader.getEntries(),
+  };
+}
+
+export async function writeMeshPack(input: WriteMeshPackInput): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file("manifest.json", `${JSON.stringify(input.manifest, null, 2)}\n`);
+
+  for (const shard of input.shards) {
+    zip.file(`index/${shard.shard_id}.json`, `${JSON.stringify(shard, null, 2)}\n`);
+  }
+
+  for (const [name, content] of Object.entries(input.resources ?? {})) {
+    zip.file(`resources/${name}`, content);
+  }
+
+  return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+}
+
+export async function validateMeshPack(data: ArrayBuffer | Uint8Array): Promise<MeshPackValidationResult> {
+  const findings: MeshPackValidationFinding[] = [];
+  try {
+    const zip = await JSZip.loadAsync(data);
+    const names = Object.keys(zip.files);
+    const namesSet = new Set(names);
+    if (names.length > 0 && names[0] !== "manifest.json") {
+      findings.push(finding("WARNING", "ZIP-001", `manifest.json should be the first ZIP entry (found '${names[0]}' first)`));
+    }
+
+    const document = await readMeshPack(data);
+    const manifest = document.manifest;
+    if (document.entries.length !== document.manifest.index_summary.total_files) {
+      findings.push(finding("WARNING", "MAN-015", "manifest index_summary.total_files does not match loaded entry count"));
+    }
+    if (document.shards.length !== document.manifest.index_summary.total_shards) {
+      findings.push(finding("WARNING", "MAN-015", "manifest index_summary.total_shards does not match loaded shard count"));
+    }
+    if (!Array.isArray(manifest.shard_list) || manifest.shard_list.length === 0) {
+      findings.push(finding("ERROR", "MAN-014", "shard_list must be a non-empty array"));
+    }
+    if (!["sha256", "sha512", "blake3"].includes(manifest.hash_algo)) {
+      findings.push(finding("ERROR", "MAN-012", `Unsupported hash_algo: '${manifest.hash_algo}'`));
+    }
+
+    for (const shardRef of manifest.shard_list ?? []) {
+      const shardPath = `index/${shardRef.id}.json`;
+      if (!/^part-\d{5}$/.test(shardRef.id)) {
+        findings.push(finding("WARNING", "SHD-001", `shard_id '${shardRef.id}' does not match ^part-\\d{5}$`));
+      }
+      if (!namesSet.has(shardPath)) {
+        findings.push(finding("ERROR", "SHD-002", `Shard file missing in archive: ${shardPath}`));
+        continue;
+      }
+      const shard = document.shards.find((candidate) => candidate.shard_id === shardRef.id);
+      if (!shard) {
+        findings.push(finding("ERROR", "SHD-003", `Failed to parse ${shardPath}`));
+        continue;
+      }
+      const paths = shard.entries.map((entry) => entry.path);
+      if (JSON.stringify(paths) !== JSON.stringify([...paths].sort())) {
+        findings.push(finding("WARNING", "SHD-004", `Entries not sorted by path in ${shardPath}`));
+      }
+      if (shardRef.entries_count !== shard.entries.length) {
+        findings.push(finding("ERROR", "SHD-005", `entries_count mismatch in ${shardPath}: expected ${shardRef.entries_count}, got ${shard.entries.length}`));
+      }
+      if (shardRef.entries_hash) {
+        try {
+          const actualHash = computeEntriesHash(shard.entries, manifest.hash_algo as HashAlgorithm);
+          if (actualHash !== shardRef.entries_hash) {
+            findings.push(finding("ERROR", "SHD-007", `entries_hash mismatch in ${shardPath}: expected ${shardRef.entries_hash}, got ${actualHash}`));
+          }
+        } catch (error) {
+          findings.push(finding("WARNING", "SHD-006", `Hash algo error in ${shardPath}: ${error instanceof Error ? error.message : String(error)}`));
+        }
+      }
+
+      for (const entry of shard.entries) {
+        findings.push(...validateEntry(entry, shardPath));
+        if (entry.resource_ref && !entry.resource_hash) {
+          findings.push(finding("WARNING", "RES-001", `${shardPath}:${entry.path} has resource_ref but missing resource_hash`));
+        }
+        if (entry.resource_ref && !namesSet.has(`resources/${entry.resource_ref}`)) {
+          findings.push(finding("ERROR", "RES-002", `Missing embedded resource: resources/${entry.resource_ref}`));
+        }
+        if (entry.resource_ref?.includes(":")) {
+          findings.push(finding("WARNING", "RES-003", `resource_ref contains ':' in ${shardPath}:${entry.path}`));
+        }
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    findings.push(finding(message.includes("manifest.json") ? "ERROR" : "ERROR", message.includes("manifest.json") ? "MAN-001" : "ARC-001", message));
+  }
+  const errors = findings.filter((item) => item.severity === "ERROR");
+  const warnings = findings.filter((item) => item.severity === "WARNING");
+  return { valid: errors.length === 0, findings, errors, warnings };
+}
+
+function finding(severity: MeshPackValidationFinding["severity"], code: string, message: string): MeshPackValidationFinding {
+  return { severity, code, message };
+}
+
+function validateEntry(entry: FileEntry, shardPath: string): MeshPackValidationFinding[] {
+  const findings: MeshPackValidationFinding[] = [];
+  if (entry.path.length > 1024) {
+    findings.push(finding("ERROR", "ENT-001", `Path exceeds 1024 chars in ${shardPath}: ${entry.path.slice(0, 80)}...`));
+  }
+  if (/(^|\/)\.\.(\/|$)/.test(entry.path)) {
+    findings.push(finding("ERROR", "ENT-002", `Path traversal detected in ${shardPath}: ${entry.path}`));
+  }
+  if (entry.path.startsWith("/")) {
+    findings.push(finding("ERROR", "ENT-003", `Absolute path in ${shardPath}: ${entry.path}`));
+  }
+  if (/^[A-Za-z]:/.test(entry.path)) {
+    findings.push(finding("ERROR", "ENT-004", `Drive letter path in ${shardPath}: ${entry.path}`));
+  }
+  if (entry.path.startsWith("\\\\")) {
+    findings.push(finding("ERROR", "ENT-005", `UNC path in ${shardPath}: ${entry.path}`));
+  }
+  if (entry.hash && !/^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$/.test(entry.hash)) {
+    findings.push(finding("WARNING", "HSH-001", `Hash format invalid for ${entry.path} in ${shardPath}`));
+  }
+  return findings;
+}
+
+export function listModelEntries(entries: FileEntry[]): FileEntry[] {
+  const modelExtensions = [".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"];
+  return entries.filter((entry) => {
+    const lower = entry.path.toLowerCase();
+    return modelExtensions.some((extension) => lower.endsWith(extension));
+  });
+}
+
+export function computeEntriesHash(entries: FileEntry[], hashAlgo: HashAlgorithm = "sha256"): string {
+  if (hashAlgo === "blake3") {
+    throw new Error("BLAKE3 hashing is not available in the TypeScript SDK runtime");
+  }
+  const sortedEntries = [...entries].sort((a, b) => a.path.localeCompare(b.path));
+  const digest = createHash(hashAlgo).update(canonicalStringify(sortedEntries), "utf8").digest("hex");
+  return `${hashAlgo}:${digest}`;
+}
+
+export function canonicalStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalStringify(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(record[key])}`).join(",")}}`;
+}
+
 export const ExtensionNames = {
 {% for ext in extensions %}
-  {{ ext.name | upper }}: '{{ ext.name }}',
+  {{ ext.name | upper }}: "{{ ext.name }}",
 {% endfor %}
 } as const;
 
-/**
- * Supported versions per extension
- */
 export const ExtensionVersions: Record<string, string[]> = {
 {% for ext in extensions %}
-  '{{ ext.name }}': {{ ext.versions | tojson }},
+  "{{ ext.name }}": {{ ext.versions | tojson }},
 {% endfor %}
 };
 
-/**
- * Get a specific version of an extension from the extensions object.
- */
-export function getExtensionVersion<T = Record<string, any>>(
-  extensions: Record<string, any> | undefined,
+export function getExtensionVersion<T = Record<string, unknown>>(
+  extensions: Record<string, unknown> | undefined,
   extName: string,
   version: string
 ): T | undefined {
-  if (!extensions) return undefined;
-  const ext = extensions[extName];
-  if (!ext || typeof ext !== 'object') return undefined;
-  return ext[version] as T | undefined;
+  if (!extensions) {
+    return undefined;
+  }
+  const extension = extensions[extName];
+  if (!extension || typeof extension !== "object") {
+    return undefined;
+  }
+  return (extension as Record<string, T>)[version];
 }
 
-/**
- * Get the latest (highest numbered) version of an extension.
- */
-export function getLatestExtension<T = Record<string, any>>(
-  extensions: Record<string, any> | undefined,
+export function getLatestExtension<T = Record<string, unknown>>(
+  extensions: Record<string, unknown> | undefined,
   extName: string
 ): { version: string; data: T } | undefined {
-  if (!extensions) return undefined;
-  const ext = extensions[extName];
-  if (!ext || typeof ext !== 'object') return undefined;
-  
-  const versions = Object.keys(ext)
-    .filter(k => k.startsWith('v') && !isNaN(parseInt(k.slice(1))))
-    .sort((a, b) => parseInt(b.slice(1)) - parseInt(a.slice(1)));
-  
-  if (versions.length === 0) return undefined;
-  const latest = versions[0];
-  return { version: latest, data: ext[latest] as T };
+  if (!extensions) {
+    return undefined;
+  }
+  const extension = extensions[extName];
+  if (!extension || typeof extension !== "object") {
+    return undefined;
+  }
+  const versioned = extension as Record<string, T>;
+  const versions = Object.keys(versioned)
+    .filter((key) => key.startsWith("v") && !Number.isNaN(Number.parseInt(key.slice(1), 10)))
+    .sort((a, b) => Number.parseInt(b.slice(1), 10) - Number.parseInt(a.slice(1), 10));
+  return versions.length === 0 ? undefined : { version: versions[0], data: versioned[versions[0]] };
 }
 
-/**
- * Get the best matching version of an extension (<= maxVersion).
- */
-export function getBestExtension<T = Record<string, any>>(
-  extensions: Record<string, any> | undefined,
+export function getBestExtension<T = Record<string, unknown>>(
+  extensions: Record<string, unknown> | undefined,
   extName: string,
   maxVersion?: string
 ): { version: string; data: T } | undefined {
-  if (!maxVersion) return getLatestExtension(extensions, extName);
-  if (!extensions) return undefined;
-  
-  const ext = extensions[extName];
-  if (!ext || typeof ext !== 'object') return undefined;
-  
-  const maxNum = parseInt(maxVersion.replace('v', ''));
-  const versions = Object.keys(ext)
-    .filter(k => k.startsWith('v') && !isNaN(parseInt(k.slice(1))))
-    .filter(k => parseInt(k.slice(1)) <= maxNum)
-    .sort((a, b) => parseInt(b.slice(1)) - parseInt(a.slice(1)));
-  
-  if (versions.length === 0) return undefined;
-  const best = versions[0];
-  return { version: best, data: ext[best] as T };
+  if (!maxVersion) {
+    return getLatestExtension<T>(extensions, extName);
+  }
+  if (!extensions) {
+    return undefined;
+  }
+  const extension = extensions[extName];
+  if (!extension || typeof extension !== "object") {
+    return undefined;
+  }
+  const max = Number.parseInt(maxVersion.replace("v", ""), 10);
+  const versioned = extension as Record<string, T>;
+  const versions = Object.keys(versioned)
+    .filter((key) => key.startsWith("v") && !Number.isNaN(Number.parseInt(key.slice(1), 10)))
+    .filter((key) => Number.parseInt(key.slice(1), 10) <= max)
+    .sort((a, b) => Number.parseInt(b.slice(1), 10) - Number.parseInt(a.slice(1), 10));
+  return versions.length === 0 ? undefined : { version: versions[0], data: versioned[versions[0]] };
 }
 
-/**
- * Set an extension version in the extensions object.
- */
 export function setExtension(
-  extensions: Record<string, any>,
+  extensions: Record<string, unknown>,
   extName: string,
   version: string,
-  data: Record<string, any>
-): Record<string, any> {
-  if (!extensions[extName]) {
-    extensions[extName] = {};
-  }
-  extensions[extName][version] = data;
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  const current = extensions[extName];
+  const versioned = current && typeof current === "object" ? current as Record<string, unknown> : {};
+  versioned[version] = data;
+  extensions[extName] = versioned;
   return extensions;
 }
-
-// ================== Typed Extension Interfaces ==================
 
 {% for ext in extensions %}
 {% for version_name, ext_models in ext.version_models.items() %}
 {% for model in ext_models %}
-/**
- * {{ ext.name }} {{ version_name }}{% if not model.is_root %} ({{ model.name }}){% endif %} extension data
- */
 export interface {{ model.name }} {
 {% for field in model.fields %}
-  {{ field.name }}?: {% if field.type.is_inline_class -%}
-  {{ field.type.base }}
-  {%- elif field.type.is_array -%}
-    {%- if field.type.item_type.base == "string" -%}
-    string[]
-    {%- elif field.type.item_type.base == "integer" or field.type.item_type.base == "number" -%}
-    number[]
-    {%- else -%}
-    any[]
-    {%- endif -%}
-  {%- elif field.type.base == "string" -%}
-  string
-  {%- elif field.type.base == "integer" or field.type.base == "number" -%}
-  number
-  {%- elif field.type.base == "boolean" -%}
-  boolean
-  {%- else -%}
-  any
-  {%- endif -%};
+  {{ field.name }}?: {{ ts_base(field.type) }};
 {% endfor %}
 }
 
 {% endfor %}
 {% endfor %}
 {% endfor %}
-
-// ================== Convenience Accessors ==================
-
 {% for ext in extensions %}
 {% for version_name, ext_models in ext.version_models.items() %}
 {% for model in ext_models %}
 {% if model.is_root %}
 {% set func_name = ext.name | replace('meshsync_', '') | title | replace('_', '') %}
-export function get{{ func_name }}(extensions: Record<string, any> | undefined): {{ model.name }} | undefined {
-  return getBestExtension<{{ model.name }}>(extensions, ExtensionNames.{{ ext.name | upper }}, '{{ version_name }}')?.data;
+export function get{{ func_name }}(extensions: Record<string, unknown> | undefined): {{ model.name }} | undefined {
+  return getBestExtension<{{ model.name }}>(extensions, ExtensionNames.{{ ext.name | upper }}, "{{ version_name }}")?.data;
 }
 
 {% endif %}

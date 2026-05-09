@@ -37,20 +37,35 @@ To prevent collisions, please stick to these conventions:
 
 ## Registry
 
-(Currently informal)
+Extension namespaces are now release-controlled. New public namespaces require a PR that names an owner, contact, lifecycle state, compatibility policy, and schema URL when the extension is standardized.
 
-If you are developing a widely used plugin or tool, please open a PR to add your namespace here to avoid collisions.
+| Prefix | Owner | Contact | Stability | Current Version | Schema URL | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `meshsync_` | MeshSync | contact@meshsync.net | Reserved | N/A | N/A | Reserved prefix for official MeshSync extensions |
+| `vscode_` | VS Code Plugin | contact@meshsync.net | Experimental | N/A | N/A | Metadata for VS Code extension display |
+| `meshsync_geometry` | MeshSync | contact@meshsync.net | Stable | `v1` | `https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_geometry.schema.json` | 3D geometry metadata |
+| `meshsync_dependencies` | MeshSync | contact@meshsync.net | Stable | `v1` | `https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_dependencies.schema.json` | Material and texture references |
+| `meshsync_printability` | MeshSync | contact@meshsync.net | Stable | `v1` | `https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_printability.schema.json` | 3D printing analysis results |
+| `meshsync_content` | MeshSync | contact@meshsync.net | Stable | `v1` | `https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_content.schema.json` | Rich content metadata |
+| `meshsync_thumbnails` | MeshSync | contact@meshsync.net | Stable | `v1` | `https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_thumbnails.schema.json` | Thumbnail and preview resource references |
+| `_deleted` | MeshSync | contact@meshsync.net | Deprecated | `v1` | N/A | Use `operation` field on FileEntry instead |
 
-| Prefix | Owner | Description |
-| :--- | :--- | :--- |
-| `meshsync_` | MeshSync | Official extensions from MeshSync ecosystem |
-| `vscode_` | VS Code Plugin | Metadata for VS Code extension display |
-| `meshsync_geometry` | MeshSync | 3D geometry metadata (vertex/face counts, manifold status) |
-| `meshsync_dependencies` | MeshSync | Material and texture file references |
-| `meshsync_printability` | MeshSync | 3D printing analysis results |
-| `meshsync_content` | MeshSync | Rich content metadata (title, description, language, tags) |
-| `meshsync_thumbnails` | MeshSync | Thumbnail and preview resource references |
-| `_deleted` | MeshSync | **Deprecated** — use `operation` field on FileEntry instead |
+### Lifecycle States
+
+| State | Meaning |
+|-------|---------|
+| Reserved | Prefix is owned and cannot be reused, but no schema is published |
+| Experimental | May change without compatibility guarantees; use `x_` or clearly named vendor prefixes |
+| Stable | Versioned schema is published and additive changes preserve compatibility |
+| Deprecated | Readers may continue to accept it, writers should stop emitting it |
+
+### Registry PR Requirements
+
+1. Use a collision-resistant namespace prefix.
+2. Provide owner and security/contact email.
+3. Document lifecycle state and compatibility expectations.
+4. Include a JSON Schema when requesting Stable status.
+5. Add examples and SDK helper tests for official MeshSync extensions.
 
 ---
 

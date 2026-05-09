@@ -25,7 +25,7 @@ from tools.meshpack_validate import (  # noqa: E402
     _jcs_serialize_number,
     _jcs_serialize_string,
 )
-from conftest import MeshPackBuilder  # noqa: E402
+from .conftest import MeshPackBuilder  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

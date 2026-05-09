@@ -1,61 +1,78 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sha2::{Digest, Sha256, Sha512};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use zip::ZipArchive;
 use typed_builder::TypedBuilder;
+use zip::{CompressionMethod, ZipArchive};
 
-// Version: {{ version }}
+pub const VERSION: &str = "{{ version }}";
 
+{% macro rust_base(t) -%}
+{%- if t.is_array -%}
+Vec<{{ rust_base(t.item_type) }}>
+{%- elif t.base == "string" or t.base == "email" -%}
+String
+{%- elif t.base == "integer" -%}
+u64
+{%- elif t.base == "number" -%}
+f64
+{%- elif t.base == "boolean" -%}
+bool
+{%- elif t.base == "datetime" -%}
+DateTime<Utc>
+{%- elif t.base == "dictionary" or t.base == "unknown" -%}
+serde_json::Value
+{%- else -%}
+{{ t.base }}
+{%- endif -%}
+{%- endmacro %}
+{% macro rust_type(field) -%}
+{%- if field.type.is_dictionary -%}
+HashMap<String, serde_json::Value>
+{%- elif field.required and not field.nullable -%}
+{{ rust_base(field.type) }}
+{%- else -%}
+Option<{{ rust_base(field.type) }}>
+{%- endif -%}
+{%- endmacro %}
 {% for model in models %}
 {% if model.name == "OSType" %}
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum OSType {
+    #[serde(rename = "linux")]
     Linux,
+    #[serde(rename = "windows")]
     Windows,
-    Macos,
+    #[serde(rename = "darwin")]
+    Darwin,
+    #[serde(rename = "unknown")]
     Unknown,
 }
+
 {% else %}
 #[derive(Debug, Serialize, Deserialize, Clone, TypedBuilder)]
 pub struct {{ model.name }} {
 {% for field in model.fields %}
-    {% if field.type.is_dictionary %}
+{% if field.name != field.rust_name %}
+    #[serde(rename = "{{ field.name }}")]
+{% endif %}
+{% if field.type.is_dictionary %}
     #[serde(default)]
     #[builder(default)]
-    pub {{ field.name }}: HashMap<String, serde_json::Value>,
-    {% else %}
-        {% if field.required == false %}
+{% elif not field.required or field.nullable %}
     #[serde(skip_serializing_if = "Option::is_none")]
     #[builder(default, setter(strip_option))]
-        {% endif %}
-    pub {{ field.name }}: 
-        {%- if field.type.is_array -%}
-        Vec<{{ field.type.item_type.base }}>
-        {%- elif field.type.base == "string" -%}
-        {{ "String" if field.required else "Option<String>" }}
-        {%- elif field.type.base == "integer" -%}
-        {{ "u64" if field.required else "Option<u64>" }}
-        {%- elif field.type.base == "boolean" -%}
-        {{ "bool" if field.required else "Option<bool>" }}
-        {%- elif field.type.base == "number" -%}
-        {{ "f64" if field.required else "Option<f64>" }}
-        {%- elif field.type.base == "datetime" -%}
-        {{ "DateTime<Utc>" if field.required else "Option<DateTime<Utc>>" }}
-        {%- elif field.type.base == "email" -%}
-        {{ "String" if field.required else "Option<String>" }}
-        {%- else -%}
-        {{ field.type.base if field.required else "Option<" + field.type.base + ">" }}
-        {%- endif -%},
-    {% endif %}
+{% endif %}
+    pub {{ field.rust_name }}: {{ rust_type(field) }},
 {% endfor %}
 }
+
 {% endif %}
 {% endfor %}
-
 pub struct MeshPackReader {
     archive: ZipArchive<File>,
     manifest: Option<Manifest>,
@@ -67,12 +84,7 @@ impl MeshPackReader {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
         let file = File::open(path)?;
         let archive = ZipArchive::new(file)?;
-        Ok(Self {
-            archive,
-            manifest: None,
-            files: HashMap::new(),
-            loaded: false,
-        })
+        Ok(Self { archive, manifest: None, files: HashMap::new(), loaded: false })
     }
 
     pub fn load_index(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -80,7 +92,6 @@ impl MeshPackReader {
             return Ok(());
         }
 
-        // Read Manifest - use block to limit scope of borrow
         {
             let mut manifest_file = self.archive.by_name("manifest.json")?;
             let mut content = String::new();
@@ -88,29 +99,26 @@ impl MeshPackReader {
             self.manifest = Some(serde_json::from_str(&content)?);
         }
 
-        // Read Shards
-        // Getting names requires iterating
-        let names: Vec<String> = self.archive.file_names().map(|s| s.to_string()).collect();
+        let names: Vec<String> = self.archive.file_names().map(|name| name.to_string()).collect();
         for name in names {
             if name.starts_with("index/") && name.ends_with(".json") {
-                 let mut shard_file = self.archive.by_name(&name)?;
-                 let mut s_content = String::new();
-                 shard_file.read_to_string(&mut s_content)?;
-                 let shard: Shard = serde_json::from_str(&s_content)?;
-                 
-                 for entry in shard.entries {
-                     self.files.insert(entry.path.clone(), entry);
-                 }
+                let mut shard_file = self.archive.by_name(&name)?;
+                let mut content = String::new();
+                shard_file.read_to_string(&mut content)?;
+                let shard: Shard = serde_json::from_str(&content)?;
+                for entry in shard.entries {
+                    self.files.insert(entry.path.clone(), entry);
+                }
             }
         }
-        
+
         self.loaded = true;
         Ok(())
     }
 
     pub fn get_manifest(&mut self) -> Result<&Manifest, Box<dyn std::error::Error>> {
         self.load_index()?;
-        self.manifest.as_ref().ok_or("Manifest not loaded".into())
+        self.manifest.as_ref().ok_or_else(|| "manifest.json was not loaded".into())
     }
 
     pub fn get_file_entry(&mut self, path: &str) -> Result<Option<&FileEntry>, Box<dyn std::error::Error>> {
@@ -118,13 +126,28 @@ impl MeshPackReader {
         Ok(self.files.get(path))
     }
 
-    /// Reads the binary content of a resource referenced by a FileEntry.
-    /// Returns Ok(Some(Vec<u8>)) if found, Ok(None) if not referenced or missing, Err on IO error.
+    pub fn list_model_entries(&mut self) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
+        self.list_by_extension(&[".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"])
+    }
+
+    pub fn list_by_extension(&mut self, extensions: &[&str]) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
+        self.load_index()?;
+        Ok(self.files.values().filter(|entry| {
+            let lower = entry.path.to_lowercase();
+            extensions.iter().any(|extension| lower.ends_with(extension))
+        }).collect())
+    }
+
+    pub fn get_files_by_hash(&mut self, hash: &str) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
+        self.load_index()?;
+        Ok(self.files.values().filter(|entry| entry.hash == hash).collect())
+    }
+
     pub fn read_resource(&mut self, entry: &FileEntry) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-        if let Some(ref res_ref) = entry.resource_ref {
-            let path = format!("resources/{}", res_ref);
+        if let Some(resource_ref) = &entry.resource_ref {
+            let path = format!("resources/{resource_ref}");
             let mut file = match self.archive.by_name(&path) {
-                Ok(f) => f,
+                Ok(file) => file,
                 Err(_) => return Ok(None),
             };
             let mut buffer = Vec::new();
@@ -134,64 +157,236 @@ impl MeshPackReader {
             Ok(None)
         }
     }
+}
 
-    pub fn get_files_by_hash(&mut self, hash: &str) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
-        self.load_index()?;
-        Ok(self.files.values()
-            .filter(|f| f.hash == hash)
-            .collect())
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationFinding {
+    pub severity: String,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ValidationResult {
+    pub findings: Vec<ValidationFinding>,
+}
+
+impl ValidationResult {
+    pub fn is_valid(&self) -> bool {
+        !self.findings.iter().any(|finding| finding.severity == "ERROR")
     }
 
-    pub fn list_by_extension(&mut self, extensions: &[&str]) -> Result<Vec<&FileEntry>, Box<dyn std::error::Error>> {
-        self.load_index()?;
-        Ok(self.files.values()
-            .filter(|f| {
-                let path = std::path::Path::new(&f.path);
-                if let Some(ext_os) = path.extension() {
-                    if let Some(ext_str) = ext_os.to_str() {
-                        let dot_ext = format!(".{}", ext_str.to_lowercase());
-                        return extensions.contains(&dot_ext.as_str());
-                    }
-                }
-                false
-            })
-            .collect())
+    pub fn errors(&self) -> Vec<&ValidationFinding> {
+        self.findings.iter().filter(|finding| finding.severity == "ERROR").collect()
+    }
+
+    pub fn warnings(&self) -> Vec<&ValidationFinding> {
+        self.findings.iter().filter(|finding| finding.severity == "WARNING").collect()
     }
 }
 
-// ================== Extension Types ==================
+pub fn validate_meshpack<P: AsRef<Path>>(path: P) -> Result<ValidationResult, Box<dyn std::error::Error>> {
+    let mut result = ValidationResult::default();
+    let file = match File::open(path.as_ref()) {
+        Ok(file) => file,
+        Err(error) => {
+            result.findings.push(finding("ERROR", "ARC-001", format!("Cannot open archive: {error}")));
+            return Ok(result);
+        }
+    };
+    let mut archive = match ZipArchive::new(file) {
+        Ok(archive) => archive,
+        Err(error) => {
+            result.findings.push(finding("ERROR", "ARC-001", format!("Cannot open archive: {error}")));
+            return Ok(result);
+        }
+    };
+
+    let mut names = Vec::new();
+    let mut total_decompressed = 0_u64;
+    for index in 0..archive.len() {
+        let file = archive.by_index(index)?;
+        let name = file.name().to_string();
+        total_decompressed += file.size();
+        if !matches!(file.compression(), CompressionMethod::Stored | CompressionMethod::Deflated) {
+            result.findings.push(finding("ERROR", "ZIP-003", format!("Entry '{name}' uses unsupported compression method")));
+        }
+        if file.compressed_size() > 0 && file.size() / file.compressed_size() > 100 {
+            result.findings.push(finding("ERROR", "ZIP-004", format!("Entry '{name}' exceeds compression ratio limit 100:1")));
+        }
+        names.push(name);
+    }
+
+    if names.first().map(|name| name.as_str()) != Some("manifest.json") && !names.is_empty() {
+        result.findings.push(finding("WARNING", "ZIP-001", format!("manifest.json should be the first ZIP entry (found '{}' first)", names[0])));
+    }
+    if total_decompressed > 10 * 1024_u64.pow(3) {
+        result.findings.push(finding("ERROR", "ZIP-005", "Total decompressed size exceeds limit of 10737418240 bytes"));
+    }
+
+    let names_set: HashSet<String> = names.iter().cloned().collect();
+    if !names_set.contains("manifest.json") {
+        result.findings.push(finding("ERROR", "MAN-001", "manifest.json not found in archive"));
+        return Ok(result);
+    }
+
+    let mut manifest_content = String::new();
+    archive.by_name("manifest.json")?.read_to_string(&mut manifest_content)?;
+    let manifest: Manifest = match serde_json::from_str(&manifest_content) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            result.findings.push(finding("ERROR", "MAN-002", format!("Failed to parse manifest.json: {error}")));
+            return Ok(result);
+        }
+    };
+    if !matches!(manifest.hash_algo.as_str(), "sha256" | "sha512" | "blake3") {
+        result.findings.push(finding("ERROR", "MAN-012", format!("Unsupported hash_algo: '{}'", manifest.hash_algo)));
+    }
+
+    for shard_ref in &manifest.shard_list {
+        let shard_path = format!("index/{}.json", shard_ref.id);
+        if !is_shard_id(&shard_ref.id) {
+            result.findings.push(finding("WARNING", "SHD-001", format!("shard_id '{}' does not match ^part-\\d{{5}}$", shard_ref.id)));
+        }
+        if !names_set.contains(&shard_path) {
+            result.findings.push(finding("ERROR", "SHD-002", format!("Shard file missing in archive: {shard_path}")));
+            continue;
+        }
+
+        let mut shard_content = String::new();
+        archive.by_name(&shard_path)?.read_to_string(&mut shard_content)?;
+        let shard: Shard = match serde_json::from_str(&shard_content) {
+            Ok(shard) => shard,
+            Err(error) => {
+                result.findings.push(finding("ERROR", "SHD-003", format!("Failed to parse {shard_path}: {error}")));
+                continue;
+            }
+        };
+        let shard_value: Value = serde_json::from_str(&shard_content)?;
+        let paths: Vec<&str> = shard.entries.iter().map(|entry| entry.path.as_str()).collect();
+        let mut sorted_paths = paths.clone();
+        sorted_paths.sort_unstable();
+        if paths != sorted_paths {
+            result.findings.push(finding("WARNING", "SHD-004", format!("Entries not sorted by path in {shard_path}")));
+        }
+        if shard_ref.entries_count != shard.entries.len() as u64 {
+            result.findings.push(finding("ERROR", "SHD-005", format!("entries_count mismatch in {shard_path}: expected {}, got {}", shard_ref.entries_count, shard.entries.len())));
+        }
+        if let Some(entries) = shard_value.get("entries").and_then(Value::as_array) {
+            match compute_entries_hash(entries, &manifest.hash_algo) {
+                Ok(actual) if actual != shard_ref.entries_hash => result.findings.push(finding("ERROR", "SHD-007", format!("entries_hash mismatch in {shard_path}: expected {}, got {actual}", shard_ref.entries_hash))),
+                Err(error) => result.findings.push(finding("WARNING", "SHD-006", format!("Hash algo error in {shard_path}: {error}"))),
+                _ => {}
+            }
+        }
+
+        for entry in &shard.entries {
+            validate_entry_path(&entry.path, &shard_path, &mut result.findings);
+            if !is_hash_value(&entry.hash) {
+                result.findings.push(finding("WARNING", "HSH-001", format!("Hash format invalid for {} in {shard_path}", entry.path)));
+            }
+            if let Some(resource_ref) = &entry.resource_ref {
+                if entry.resource_hash.is_none() {
+                    result.findings.push(finding("WARNING", "RES-001", format!("{shard_path}:{} has resource_ref but missing resource_hash", entry.path)));
+                }
+                if !names_set.contains(&format!("resources/{resource_ref}")) {
+                    result.findings.push(finding("ERROR", "RES-002", format!("Missing embedded resource: resources/{resource_ref}")));
+                }
+                if resource_ref.contains(':') {
+                    result.findings.push(finding("WARNING", "RES-003", format!("resource_ref contains ':' in {shard_path}:{}", entry.path)));
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+fn finding(severity: &str, code: &str, message: impl Into<String>) -> ValidationFinding {
+    ValidationFinding { severity: severity.to_string(), code: code.to_string(), message: message.into() }
+}
+
+fn is_shard_id(value: &str) -> bool {
+    value.len() == 10 && value.starts_with("part-") && value[5..].chars().all(|item| item.is_ascii_digit())
+}
+
+fn is_hash_value(value: &str) -> bool {
+    let Some((algo, hex)) = value.split_once(':') else { return false; };
+    let expected_len = match algo {
+        "sha256" | "blake3" => 64,
+        "sha512" => 128,
+        _ => return false,
+    };
+    hex.len() == expected_len && hex.chars().all(|item| item.is_ascii_hexdigit() && !item.is_ascii_uppercase())
+}
+
+fn validate_entry_path(path: &str, shard_path: &str, findings: &mut Vec<ValidationFinding>) {
+    if path.len() > 1024 {
+        findings.push(finding("ERROR", "ENT-001", format!("Path exceeds 1024 chars in {shard_path}: {}...", &path[..80.min(path.len())])));
+    }
+    if path.split('/').any(|part| part == "..") {
+        findings.push(finding("ERROR", "ENT-002", format!("Path traversal detected in {shard_path}: {path}")));
+    }
+    if path.starts_with('/') {
+        findings.push(finding("ERROR", "ENT-003", format!("Absolute path in {shard_path}: {path}")));
+    }
+    if path.len() >= 2 && path.as_bytes()[0].is_ascii_alphabetic() && path.as_bytes()[1] == b':' {
+        findings.push(finding("ERROR", "ENT-004", format!("Drive letter path in {shard_path}: {path}")));
+    }
+    if path.starts_with("\\\\") {
+        findings.push(finding("ERROR", "ENT-005", format!("UNC path in {shard_path}: {path}")));
+    }
+}
+
+fn compute_entries_hash(entries: &[Value], algo: &str) -> Result<String, String> {
+    let mut sorted_entries = entries.to_vec();
+    sorted_entries.sort_by(|left, right| {
+        let left_path = left.get("path").and_then(Value::as_str).unwrap_or_default();
+        let right_path = right.get("path").and_then(Value::as_str).unwrap_or_default();
+        left_path.cmp(right_path)
+    });
+    let encoded = canonical_json(&Value::Array(sorted_entries));
+    let digest = match algo {
+        "sha256" => format!("{:x}", Sha256::digest(encoded.as_bytes())),
+        "sha512" => format!("{:x}", Sha512::digest(encoded.as_bytes())),
+        "blake3" => blake3::hash(encoded.as_bytes()).to_hex().to_string(),
+        _ => return Err(format!("Unsupported hash algorithm: {algo}")),
+    };
+    Ok(format!("{algo}:{digest}"))
+}
+
+fn canonical_json(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(item) => item.to_string(),
+        Value::Number(item) => item.to_string(),
+        Value::String(item) => serde_json::to_string(item).unwrap_or_else(|_| "\"\"".to_string()),
+        Value::Array(items) => format!("[{}]", items.iter().map(canonical_json).collect::<Vec<_>>().join(",")),
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_unstable();
+            let pairs = keys.into_iter().map(|key| {
+                format!("{}:{}", serde_json::to_string(key).unwrap_or_default(), canonical_json(&map[key]))
+            }).collect::<Vec<_>>();
+            let mut encoded = String::from("{");
+            encoded.push_str(&pairs.join(","));
+            encoded.push('}');
+            encoded
+        }
+    }
+}
 
 {% for ext in extensions %}
 {% for version_name, ext_models in ext.version_models.items() %}
 {% for model in ext_models %}
-/// {{ ext.name }} {{ version_name }}{% if not model.is_root %} ({{ model.name }}){% endif %} extension data
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct {{ model.name }} {
 {% for field in model.fields %}
+{% if field.name != field.rust_name %}
+    #[serde(rename = "{{ field.name }}")]
+{% endif %}
     #[serde(skip_serializing_if = "Option::is_none")]
-{% if field.type.is_inline_class %}
-    pub {{ field.name }}: Option<{{ field.type.base }}>,
-{% elif field.type.is_array %}
-{% if field.type.item_type.base == "string" %}
-    pub {{ field.name }}: Option<Vec<String>>,
-{% elif field.type.item_type.base == "integer" %}
-    pub {{ field.name }}: Option<Vec<u64>>,
-{% elif field.type.item_type.base == "number" %}
-    pub {{ field.name }}: Option<Vec<f64>>,
-{% else %}
-    pub {{ field.name }}: Option<Vec<serde_json::Value>>,
-{% endif %}
-{% elif field.type.base == "string" %}
-    pub {{ field.name }}: Option<String>,
-{% elif field.type.base == "integer" %}
-    pub {{ field.name }}: Option<u64>,
-{% elif field.type.base == "number" %}
-    pub {{ field.name }}: Option<f64>,
-{% elif field.type.base == "boolean" %}
-    pub {{ field.name }}: Option<bool>,
-{% else %}
-    pub {{ field.name }}: Option<serde_json::Value>,
-{% endif %}
+    pub {{ field.rust_name }}: Option<{{ rust_base(field.type) }}>,
 {% endfor %}
 }
 

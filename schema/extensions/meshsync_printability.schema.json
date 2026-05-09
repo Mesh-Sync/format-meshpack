@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/extensions/meshsync_printability.json",
+  "$id": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_printability.schema.json",
   "title": "MeshSync Printability Extension",
   "description": "3D printing analysis results, technology-agnostic with technology-specific sub-objects",
   "type": "object",

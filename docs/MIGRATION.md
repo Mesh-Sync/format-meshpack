@@ -1,5 +1,19 @@
 # Migration Guide
 
+## Migrating from pre-1.1 generated SDKs
+
+MeshPack `1.1.0` makes Python, Rust, TypeScript, and Java 17 first-class generated SDK targets.
+
+Important changes for SDK consumers:
+
+1. Package versions are generated from the repository `VERSION` file.
+2. Generated SDK output is cleaned before generation, so removed templates no longer leave stale package files behind.
+3. SDKs expose validator result types using the shared `severity`/`code`/`message` finding shape.
+4. Java records ignore unknown JSON fields and deserialize wire enum values such as `"linux"` correctly.
+5. TypeScript is Node-first for validation because hashing uses Node crypto APIs.
+
+The Python reference validator remains the authority for detached sidecar and signature verification.
+
 ## Migrating from `_deleted` Extension to `operation` Field
 
 ### Background

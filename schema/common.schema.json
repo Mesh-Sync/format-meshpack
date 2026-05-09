@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/common.json",
+  "$id": "https://meshsync.net/schemas/meshpack/1.1/common.schema.json",
   "title": "MeshPack Common Definitions",
   "description": "Shared type definitions referenced by manifest, shard, and sidecar schemas. Canonical source of truth for shared enums and patterns.",
   "definitions": {

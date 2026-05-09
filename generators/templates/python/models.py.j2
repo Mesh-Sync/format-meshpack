@@ -1,13 +1,54 @@
-from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field, EmailStr
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
-import zipfile
+from typing import Any, Dict, List, Optional
+import hashlib
 import json
 import os
+import re
+import zipfile
 
-# Version: {{ version }}
+from pydantic import BaseModel, Field
 
+
+__version__ = "{{ version }}"
+
+HASH_PATTERN = re.compile(r"^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$")
+ALLOWED_COMPRESSION = {zipfile.ZIP_DEFLATED, zipfile.ZIP_STORED}
+MAX_DECOMPRESSED_SIZE = 10 * 1024**3
+MAX_COMPRESSION_RATIO = 100
+
+
+{% macro py_type(t) -%}
+{%- if t.is_array -%}
+List[{{ py_type(t.item_type) }}]
+{%- elif t.base == "string" or t.base == "email" -%}
+str
+{%- elif t.base == "integer" -%}
+int
+{%- elif t.base == "number" -%}
+float
+{%- elif t.base == "boolean" -%}
+bool
+{%- elif t.base == "datetime" -%}
+datetime
+{%- elif t.base == "dictionary" -%}
+Dict[str, Any]
+{%- elif t.base == "unknown" -%}
+Any
+{%- else -%}
+{{ t.base }}
+{%- endif -%}
+{%- endmacro %}
+{% macro py_annotation(field) -%}
+{%- if field.required and not field.nullable -%}
+{{ py_type(field.type) }}
+{%- else -%}
+Optional[{{ py_type(field.type) }}]
+{%- endif -%}
+{%- endmacro %}
+{% macro py_default(field) %}{% if field.required %}{% elif field.type.is_dictionary %} = Field(default_factory=dict){% else %} = None{% endif %}{% endmacro %}
 {% for model in models %}
 {% if model.name == "OSType" %}
 class OSType(str, Enum):
@@ -15,145 +56,256 @@ class OSType(str, Enum):
     WINDOWS = "windows"
     DARWIN = "darwin"
     UNKNOWN = "unknown"
+
 {% else %}
 class {{ model.name }}(BaseModel):
+{% if model.fields %}
 {% for field in model.fields %}
-    {% if field.type.is_inline_class %}
-    {{ field.name }}: '{{ field.type.base }}'
-    {% elif field.type.is_enum %}
-    {{ field.name }}: {{ field.type.base }} = Field(..., description="Enum value")
-    {% elif field.type.is_primitive %}
-        {% if field.type.base == "string" %}
-    {{ field.name }}: {{ "str" if field.required else "Optional[str]" }} {{ "= None" if not field.required else "" }}
-        {% elif field.type.base == "integer" %}
-    {{ field.name }}: {{ "int" if field.required else "Optional[int]" }} {{ "= None" if not field.required else "" }}
-        {% elif field.type.base == "boolean" %}
-    {{ field.name }}: {{ "bool" if field.required else "Optional[bool]" }} {{ "= False" if not field.required else "" }}
-        {% elif field.type.base == "number" %}
-    {{ field.name }}: {{ "float" if field.required else "Optional[float]" }} {{ "= None" if not field.required else "" }}
-        {% elif field.type.base == "datetime" %}
-    {{ field.name }}: {{ "datetime" if field.required else "Optional[datetime]" }} {{ "= None" if not field.required else "" }}
-        {% elif field.type.base == "email" %}
-    {{ field.name }}: {{ "EmailStr" if field.required else "Optional[EmailStr]" }} {{ "= None" if not field.required else "" }}
-        {% elif field.type.base == "dictionary" %}
-    {{ field.name }}: Dict[str, Any] = Field(default_factory=dict)
-        {% endif %}
-    {% elif field.type.is_array %}
-    {{ field.name }}: List['{{ field.type.item_type.base }}'] = Field(default_factory=list)
-    {% elif field.type.is_ref %}
-    {{ field.name }}: '{{ field.type.base }}'
-    {% endif %}
+    {{ field.name }}: {{ py_annotation(field) }}{{ py_default(field) }}
 {% endfor %}
+{% else %}
+    pass
 {% endif %}
 
+{% endif %}
 {% endfor %}
 
-# Utility Class
+class ValidationFinding(BaseModel):
+    severity: str
+    code: str
+    message: str
+
+
+class ValidationResult(BaseModel):
+    findings: List[ValidationFinding] = Field(default_factory=list)
+
+    @property
+    def valid(self) -> bool:
+        return not any(finding.severity == "ERROR" for finding in self.findings)
+
+    @property
+    def errors(self) -> List[ValidationFinding]:
+        return [finding for finding in self.findings if finding.severity == "ERROR"]
+
+    @property
+    def warnings(self) -> List[ValidationFinding]:
+        return [finding for finding in self.findings if finding.severity == "WARNING"]
+
+
+def _finding(severity: str, code: str, message: str) -> ValidationFinding:
+    return ValidationFinding(severity=severity, code=code, message=message)
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _compute_digest(data: bytes, algo: str) -> str:
+    if algo == "sha256":
+        return hashlib.sha256(data).hexdigest()
+    if algo == "sha512":
+        return hashlib.sha512(data).hexdigest()
+    if algo == "blake3":
+        try:
+            import blake3  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise ValueError("BLAKE3 support requires the blake3 package") from exc
+        return blake3.blake3(data).hexdigest()
+    raise ValueError(f"Unsupported hash algorithm: {algo}")
+
+
+def _compute_entries_hash(entries: List[Dict[str, Any]], algo: str) -> str:
+    sorted_entries = sorted(entries, key=lambda entry: entry.get("path", ""))
+    digest = _compute_digest(_canonical_json(sorted_entries).encode("utf-8"), algo)
+    return f"{algo}:{digest}"
+
+
+def _check_entry_path(path: str, shard_path: str, findings: List[ValidationFinding]) -> None:
+    if len(path) > 1024:
+        findings.append(_finding("ERROR", "ENT-001", f"Path exceeds 1024 chars in {shard_path}: {path[:80]}..."))
+    if re.search(r"(^|/)\.\.(/|$)", path):
+        findings.append(_finding("ERROR", "ENT-002", f"Path traversal detected in {shard_path}: {path}"))
+    if path.startswith("/"):
+        findings.append(_finding("ERROR", "ENT-003", f"Absolute path in {shard_path}: {path}"))
+    if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
+        findings.append(_finding("ERROR", "ENT-004", f"Drive letter path in {shard_path}: {path}"))
+    if path.startswith("\\\\"):
+        findings.append(_finding("ERROR", "ENT-005", f"UNC path in {shard_path}: {path}"))
+
+
+def validate_meshpack(
+    file_path: str,
+    max_size: int = MAX_DECOMPRESSED_SIZE,
+    max_ratio: int = MAX_COMPRESSION_RATIO,
+) -> ValidationResult:
+    findings: List[ValidationFinding] = []
+
+    try:
+        archive = zipfile.ZipFile(file_path, "r")
+    except (FileNotFoundError, zipfile.BadZipFile) as exc:
+        return ValidationResult(findings=[_finding("ERROR", "ARC-001", f"Cannot open archive: {exc}")])
+
+    with archive:
+        names = archive.namelist()
+        names_set = set(names)
+        if names and names[0] != "manifest.json":
+            findings.append(_finding("WARNING", "ZIP-001", f"manifest.json should be the first ZIP entry (found '{names[0]}' first)"))
+
+        total_decompressed = 0
+        for info in archive.infolist():
+            total_decompressed += info.file_size
+            if info.compress_type not in ALLOWED_COMPRESSION:
+                findings.append(_finding("ERROR", "ZIP-003", f"Entry '{info.filename}' uses unsupported compression method {info.compress_type}"))
+            if info.compress_size > 0 and info.file_size / info.compress_size > max_ratio:
+                findings.append(_finding("ERROR", "ZIP-004", f"Entry '{info.filename}' exceeds compression ratio limit {max_ratio}:1"))
+        if total_decompressed > max_size:
+            findings.append(_finding("ERROR", "ZIP-005", f"Total decompressed size exceeds limit of {max_size} bytes"))
+
+        if "manifest.json" not in names_set:
+            findings.append(_finding("ERROR", "MAN-001", "manifest.json not found in archive"))
+            return ValidationResult(findings=findings)
+
+        try:
+            with archive.open("manifest.json") as manifest_file:
+                manifest = json.load(manifest_file)
+        except (json.JSONDecodeError, KeyError) as exc:
+            findings.append(_finding("ERROR", "MAN-002", f"Failed to parse manifest.json: {exc}"))
+            return ValidationResult(findings=findings)
+
+        required = ["format_version", "created_at", "creator_info", "platform_info", "index_summary", "hash_algo", "shard_list"]
+        for field_name in required:
+            if field_name not in manifest:
+                findings.append(_finding("ERROR", "MAN-010", f"Missing required field: {field_name}"))
+        if manifest.get("format_version") and not re.match(r"^\d+\.\d+\.\d+$", manifest["format_version"]):
+            findings.append(_finding("WARNING", "MAN-011", f"format_version '{manifest['format_version']}' is not valid semver"))
+
+        algo = manifest.get("hash_algo", "sha256")
+        if algo not in {"sha256", "sha512", "blake3"}:
+            findings.append(_finding("ERROR", "MAN-012", f"Unsupported hash_algo: '{algo}'"))
+        shard_list = manifest.get("shard_list")
+        if not isinstance(shard_list, list) or not shard_list:
+            findings.append(_finding("ERROR", "MAN-014", "shard_list must be a non-empty array"))
+            shard_list = []
+
+        summary = manifest.get("index_summary")
+        if isinstance(summary, dict):
+            for field_name in ("total_files", "total_shards", "total_size_bytes"):
+                if field_name not in summary:
+                    findings.append(_finding("ERROR", "MAN-015", f"index_summary missing required field: {field_name}"))
+
+        for shard_meta in shard_list:
+            shard_id = shard_meta.get("id", "")
+            shard_path = f"index/{shard_id}.json"
+            if not re.match(r"^part-\d{5}$", shard_id):
+                findings.append(_finding("WARNING", "SHD-001", f"shard_id '{shard_id}' does not match ^part-\\d{{5}}$"))
+            if shard_path not in names_set:
+                findings.append(_finding("ERROR", "SHD-002", f"Shard file missing in archive: {shard_path}"))
+                continue
+            try:
+                with archive.open(shard_path) as shard_file:
+                    shard = json.load(shard_file)
+            except (json.JSONDecodeError, KeyError) as exc:
+                findings.append(_finding("ERROR", "SHD-003", f"Failed to parse {shard_path}: {exc}"))
+                continue
+
+            entries = shard.get("entries", [])
+            paths = [entry.get("path", "") for entry in entries]
+            if paths != sorted(paths):
+                findings.append(_finding("WARNING", "SHD-004", f"Entries not sorted by path in {shard_path}"))
+            expected_count = shard_meta.get("entries_count", shard.get("entries_count"))
+            if expected_count is not None and expected_count != len(entries):
+                findings.append(_finding("ERROR", "SHD-005", f"entries_count mismatch in {shard_path}: expected {expected_count}, got {len(entries)}"))
+            expected_hash = shard_meta.get("entries_hash") or shard.get("entries_hash")
+            if expected_hash:
+                try:
+                    actual_hash = _compute_entries_hash(entries, algo)
+                    if actual_hash != expected_hash:
+                        findings.append(_finding("ERROR", "SHD-007", f"entries_hash mismatch in {shard_path}: expected {expected_hash}, got {actual_hash}"))
+                except ValueError as exc:
+                    findings.append(_finding("WARNING", "SHD-006", f"Hash algo error in {shard_path}: {exc}"))
+
+            for entry in entries:
+                entry_path = entry.get("path", "")
+                _check_entry_path(entry_path, shard_path, findings)
+                entry_hash = entry.get("hash", "")
+                if entry_hash and not HASH_PATTERN.match(entry_hash):
+                    findings.append(_finding("WARNING", "HSH-001", f"Hash format invalid for {entry_path} in {shard_path}"))
+                resource_ref = entry.get("resource_ref")
+                if resource_ref and not entry.get("resource_hash"):
+                    findings.append(_finding("WARNING", "RES-001", f"{shard_path}:{entry_path} has resource_ref but missing resource_hash"))
+                if resource_ref and f"resources/{resource_ref}" not in names_set:
+                    findings.append(_finding("ERROR", "RES-002", f"Missing embedded resource: resources/{resource_ref}"))
+                if resource_ref and ":" in resource_ref:
+                    findings.append(_finding("WARNING", "RES-003", f"resource_ref contains ':' in {shard_path}:{entry_path}"))
+
+    return ValidationResult(findings=findings)
+
 class MeshPackReader:
     def __init__(self, file_path: str):
         self.file_path = file_path
-        self._zip = zipfile.ZipFile(file_path, 'r')
+        self._zip = zipfile.ZipFile(file_path, "r")
         self._manifest: Optional[Manifest] = None
         self._files: Dict[str, FileEntry] = {}
         self._loaded = False
 
-    def load(self):
+    def close(self) -> None:
+        self._zip.close()
+
+    def load(self) -> None:
         if self._loaded:
             return
-        
-        # Load Manifest
-        with self._zip.open("manifest.json") as f:
-            data = json.load(f)
-            self._manifest = Manifest(**data)
-            
-        # Load Shards
+
+        with self._zip.open("manifest.json") as manifest_file:
+            self._manifest = Manifest(**json.load(manifest_file))
+
         for name in self._zip.namelist():
             if name.startswith("index/") and name.endswith(".json"):
-                with self._zip.open(name) as f:
-                    shard_data = json.load(f)
-                    shard = Shard(**shard_data)
+                with self._zip.open(name) as shard_file:
+                    shard = Shard(**json.load(shard_file))
                     for entry in shard.entries:
                         self._files[entry.path] = entry
-        
+
         self._loaded = True
 
     @property
     def manifest(self) -> Manifest:
         self.load()
-        return self._manifest # type: ignore
+        if self._manifest is None:
+            raise ValueError("manifest.json was not loaded")
+        return self._manifest
 
     def get_file_entry(self, path: str) -> Optional[FileEntry]:
         self.load()
         return self._files.get(path)
 
-    def list_models_instances(self) -> List[FileEntry]:
+    def list_model_entries(self) -> List[FileEntry]:
         self.load()
-        # Naive extension check
         model_exts = {".stl", ".obj", ".3mf", ".step", ".stp", ".ply", ".off"}
-        return [
-            f for f in self._files.values() 
-            if os.path.splitext(f.path)[1].lower() in model_exts
-        ]
+        return [entry for entry in self._files.values() if os.path.splitext(entry.path)[1].lower() in model_exts]
 
-    def get_associated_resources(self, file_entry: FileEntry) -> List[str]:
-        """
-        Returns a list of keys (hashes) or paths for associated resources.
-        Currently primarily looks at 'resource_ref'.
-        """
-        refs = []
-        if file_entry.resource_ref:
-            refs.append(file_entry.resource_ref)
-        return refs
+    def list_by_extension(self, extensions: List[str]) -> List[FileEntry]:
+        self.load()
+        normalized = {extension.lower() for extension in extensions}
+        return [entry for entry in self._files.values() if os.path.splitext(entry.path)[1].lower() in normalized]
+
+    def get_files_by_hash(self, file_hash: str) -> List[FileEntry]:
+        self.load()
+        return [entry for entry in self._files.values() if entry.hash == file_hash]
 
     def read_resource(self, file_entry: FileEntry) -> Optional[bytes]:
-        """
-        Reads the content of the associated resource if it exists in the pack.
-        Returns bytes of the file content (e.g. thumbnail image).
-        """
         if not file_entry.resource_ref:
             return None
-        
-        # Internal path convention: resources/<hash>.<ext> or just <filename>
-        # The resource_ref IS the filename in the resources/ folder
-        path = f"resources/{file_entry.resource_ref}"
         try:
-            with self._zip.open(path) as f:
-                return f.read()
+            with self._zip.open(f"resources/{file_entry.resource_ref}") as resource_file:
+                return resource_file.read()
         except KeyError:
             return None
 
-    def get_files_by_hash(self, file_hash: str) -> List[FileEntry]:
-        """Finds all file entries matching a specific content hash."""
-        self.load()
-        return [f for f in self._files.values() if f.hash == file_hash]
-
-    def list_by_extension(self, extensions: List[str]) -> List[FileEntry]:
-        """
-        Generic filter by extension.
-        Args:
-            extensions: List of extensions including dot, e.g. ['.jpg', '.png']
-        """
-        self.load()
-        # Normalize extensions to lowercase
-        exts = {e.lower() for e in extensions}
-        return [
-            f for f in self._files.values() 
-            if os.path.splitext(f.path)[1].lower() in exts
-        ]
-
     def validate_integrity(self) -> Dict[str, List[str]]:
-        """
-        Checks if all referenced resources exist in the zip.
-        Returns a dict with 'missing_resources'.
-        """
         self.load()
-        missing = []
+        missing_resources = []
+        names = set(self._zip.namelist())
         for entry in self._files.values():
-            if entry.resource_ref:
-                path = f"resources/{entry.resource_ref}"
-                try:
-                    self._zip.getinfo(path)
-                except KeyError:
-                    missing.append(entry.path)
-        
-        return {"missing_resources": missing}
+            if entry.resource_ref and f"resources/{entry.resource_ref}" not in names:
+                missing_resources.append(entry.path)
+        return {"missing_resources": missing_resources}

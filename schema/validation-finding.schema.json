@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://meshsync.net/schemas/meshpack/1.1/validation-finding.schema.json",
+  "title": "MeshPack Validation Finding",
+  "description": "Language-neutral validation finding emitted by reference and SDK validators.",
+  "type": "object",
+  "required": ["severity", "code", "message"],
+  "properties": {
+    "severity": {
+      "type": "string",
+      "enum": ["ERROR", "WARNING", "INFO"]
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}-[0-9]{3}$"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "path": {
+      "type": "string",
+      "description": "Optional archive path, JSON pointer, or resource path associated with the finding."
+    }
+  },
+  "additionalProperties": false
+}

@@ -25,11 +25,11 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
   - `manifest.schema.json`, `shard.schema.json`, `sidecar.schema.json`, `common.schema.json`
   - `extensions/` — versioned extension schemas:
     `meshsync_geometry`, `meshsync_printability`, `meshsync_dependencies`, `meshsync_content`, `meshsync_thumbnails`
-- **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas.
+- **[`generators/`](generators/)**: Python scripts and Jinja2 templates that generate client libraries from the schemas for Python, Rust, TypeScript, and Java 17+.
 - **[`tools/`](tools/)**: Standalone tools (`meshpack_validate.py` — archive validator with JCS, signature, and path security checks).
 - **[`tests/conformance/`](tests/conformance/)**: Conformance test suite (L1/L2/L3) with static fixture archives.
 - **[`samples/`](samples/)**: Example manifest and shard JSON files.
-- **[`docs/`](docs/)**: Additional documentation (geometry canonical field names, etc.).
+- **[`docs/`](docs/)**: Release, schema hosting, conformance, validation, SDK quickstart, and additional reference documents.
 - **[`generated/`](generated/)**: (Gitignored) The output directory for generated SDKs.
 
 ## Usage
@@ -40,25 +40,31 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 - **Python 3.10+** (for generators)
 - **Node.js/npm** (for TypeScript SDK build)
 - **Rust/Cargo** (for Rust SDK build)
+- **JDK 17 + Maven** (for Java SDK build)
 - **Just** (`curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin`)
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `just generate` | Generates SDK code for Python, Rust, and TypeScript into `generated/sdks/`. |
+| `just generate` | Generates SDK code for Python, Rust, TypeScript, and Java 17 into `generated/sdks/`. |
+| `just check-version` | Verifies all generated package versions match `VERSION`. |
+| `just determinism-check` | Runs generation twice and verifies generated source output is byte-identical. |
 | `just validate` | Validates all JSON schemas against the meta-schema. |
-| `just compile` | Builds the generated SDKs (Python Wheel, Rust Crate, NPM Package). |
-| `just all` | Runs generate, validate, and compile. |
+| `just compile` | Builds the generated SDKs (Python wheel, Rust crate, NPM package, Maven package). |
+| `just lint` | Runs generator lint plus generated Rust, TypeScript, and Java compile checks. |
+| `just test` | Runs Python tests and generated Rust, TypeScript, and Java test/build gates. |
+| `just all` | Runs generate, validate, lint, test, and compile. |
 | `just clean` | Removes the `generated/` directory. |
 
 ## SDKs
 
-The generator produces strongly-typed client libraries ensuring 100% compliance with the spec.
+The generator produces strongly-typed client libraries for core MeshPack reading and writing. The Python reference validator remains the source of truth for full conformance checks until each SDK reaches validator parity.
 
 - **Python**: Pydantic models with `zipfile` abstraction.
 - **Rust**: Serde structs with `zip` crate integration.
-- **TypeScript**: Typed interfaces with `jszip`.
+- **TypeScript**: Typed interfaces with `jszip`, archive read/write helpers, entry hashing, validation, and model-entry listing.
+- **Java 17+**: Records/enums with Jackson JSON property mapping and a ZIP reader packaged with Maven.
 
 ## Contributing
 
@@ -68,4 +74,6 @@ The generator produces strongly-typed client libraries ensuring 100% compliance 
     *   Logic: `generators/generate_sdks.py`
     *   Templates: `generators/templates/`
 4.  **Regenerate**: Run `just generate` to verify your changes produce valid code.
-5.  **Test**: Run `just compile` to ensure the generated code builds.
+5.  **Test**: Run `just all` to ensure schemas, generators, conformance fixtures, and all generated SDKs build.
+
+See [docs/SDK_QUICKSTARTS.md](docs/SDK_QUICKSTARTS.md), [docs/VALIDATION_CONTRACT.md](docs/VALIDATION_CONTRACT.md), and [docs/SCHEMA_HOSTING.md](docs/SCHEMA_HOSTING.md) for public integration details.

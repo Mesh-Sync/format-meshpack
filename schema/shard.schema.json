@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/shard.json",
+  "$id": "https://meshsync.net/schemas/meshpack/1.1/shard.schema.json",
   "title": "MeshPack Index Shard",
   "description": "Sharded file index containing a subset of file entries. See common.schema.json for shared definitions.",
   "type": "object",

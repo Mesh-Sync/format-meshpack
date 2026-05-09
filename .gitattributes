@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+/generated export-ignore
+/.pytest_cache export-ignore
+/.mypy_cache export-ignore
+/node_modules export-ignore
+/dist export-ignore
+/build export-ignore

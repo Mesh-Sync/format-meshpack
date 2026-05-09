@@ -6,7 +6,7 @@ Provides utilities for reading and writing versioned MeshSync extensions.
 Extensions follow the pattern: { "meshsync_<name>": { "v1": {...}, "v2": {...} } }
 """
 
-from typing import Dict, Any, Optional, TypeVar, Generic, List
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
@@ -22,10 +22,6 @@ EXTENSION_VERSIONS: Dict[str, List[str]] = {
     "{{ ext.name }}": {{ ext.versions }},
 {% endfor %}
 }
-
-
-T = TypeVar('T')
-
 
 def get_extension_version(extensions: Dict[str, Any], ext_name: str, version: str) -> Optional[Dict[str, Any]]:
     """

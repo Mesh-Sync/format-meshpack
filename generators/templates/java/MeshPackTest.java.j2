@@ -1,0 +1,105 @@
+package {{ java_package }};
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+import org.junit.jupiter.api.Test;
+
+class MeshPackTest {
+  @Test
+  void readerAcceptsWireEnumsAndUnknownFields() throws Exception {
+    Path archive = Files.createTempFile("meshpack-java-sdk", ".meshpack");
+    try {
+      try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+        writeEntry(zip, "manifest.json", """
+            {
+              "format_version": "1.0.0",
+              "created_at": "2026-01-13T22:41:51Z",
+              "creator_info": { "name": "Java SDK Test", "unknown": true },
+              "platform_info": {
+                "os": "linux",
+                "path_separator": "/",
+                "is_case_sensitive": true,
+                "unknown": "ignored"
+              },
+              "index_summary": {
+                "total_files": 1,
+                "total_shards": 1,
+                "total_size_bytes": 5
+              },
+              "hash_algo": "sha256",
+              "shard_list": [
+                {
+                  "id": "part-00001",
+                  "entries_count": 1,
+                  "entries_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+              ],
+              "unknown": "ignored"
+            }
+            """);
+        writeEntry(zip, "index/part-00001.json", """
+            {
+              "shard_id": "part-00001",
+              "format_version": "1.0.0",
+              "entries_count": 1,
+              "entries_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "entries": [
+                {
+                  "path": "model.stl",
+                  "original_name": "model.stl",
+                  "size_bytes": 5,
+                  "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "modified_at": "2026-01-13T22:41:51Z",
+                  "unknown": "ignored"
+                }
+              ],
+              "unknown": "ignored"
+            }
+            """);
+      }
+
+      try (MeshPack.Reader reader = new MeshPack.Reader(archive)) {
+        MeshPack.MeshPackDocument document = reader.readDocument();
+
+        assertEquals(MeshPack.OSType.LINUX, document.manifest().platform_info().os());
+        assertEquals("linux", document.manifest().platform_info().os().value());
+        assertEquals(1, document.shards().size());
+        assertEquals(1, document.entries().size());
+        assertEquals("model.stl", document.entries().get(0).path());
+      }
+    } finally {
+      Files.deleteIfExists(archive);
+    }
+  }
+
+  @Test
+  void validatorReportsMissingManifest() throws Exception {
+    Path archive = Files.createTempFile("meshpack-java-sdk-invalid", ".meshpack");
+    try {
+      try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+        writeEntry(zip, "index/part-00001.json", "{}");
+      }
+
+      MeshPack.ValidationResult result = MeshPack.validate(archive);
+
+      assertFalse(result.valid());
+      assertTrue(result.errors().stream().anyMatch(finding -> "MAN-001".equals(finding.code())));
+    } finally {
+      Files.deleteIfExists(archive);
+    }
+  }
+
+  private static void writeEntry(ZipOutputStream zip, String name, String contents) throws Exception {
+    zip.putNextEntry(new ZipEntry(name));
+    zip.write(contents.getBytes(StandardCharsets.UTF_8));
+    zip.closeEntry();
+  }
+}

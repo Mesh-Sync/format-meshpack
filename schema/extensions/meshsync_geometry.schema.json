@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/extensions/meshsync_geometry.json",
+  "$id": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_geometry.schema.json",
   "title": "MeshSync Geometry Extension",
   "description": "Geometry analysis metadata for 3D model files",
   "type": "object",

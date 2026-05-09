@@ -9,11 +9,17 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generators'))
 
 from generate_sdks import (
+    clean_generated_sdks,
     get_type_info,
     snake_to_pascal,
     extract_extension_models,
     load_extension_schemas,
+    load_version,
+    MODEL_OUTPUTS,
 )
+
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 # ---- get_type_info tests ----
@@ -188,6 +194,19 @@ class TestExtractExtensionModels:
         models = extract_extension_models(version_schema, "meshsync_geometry", "v2")
         assert models[0]["name"] == "GeometryV2"
 
+    def test_reserved_json_field_names_get_safe_language_identifiers(self):
+        """JSON names stay intact while Rust/Java avoid reserved keywords."""
+        version_schema = {
+            "type": "object",
+            "properties": {"static": {"type": "string"}},
+        }
+        models = extract_extension_models(version_schema, "meshsync_thumbnails", "v1")
+        field = models[0]["fields"][0]
+
+        assert field["name"] == "static"
+        assert field["rust_name"] == "static_"
+        assert field["java_name"] == "static_"
+
 
 # ---- load_extension_schemas tests ----
 
@@ -244,3 +263,88 @@ class TestLoadExtensionSchemas:
         extensions = load_extension_schemas()
         names = [e["name"] for e in extensions]
         assert names == sorted(names)
+
+
+class TestGenerationReleaseReadiness:
+    def test_version_file_is_single_source(self):
+        assert load_version() == "1.1.0"
+
+    def test_load_version_rejects_invalid_semver(self, tmp_path):
+        version_file = tmp_path / "VERSION"
+        version_file.write_text("not-a-version\n", encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            load_version(str(version_file))
+
+    def test_clean_generated_sdks_removes_stale_files(self, tmp_path):
+        output_dir = tmp_path / "generated" / "sdks"
+        stale_file = output_dir / "typescript" / "stale.js"
+        stale_file.parent.mkdir(parents=True)
+        stale_file.write_text("stale", encoding="utf-8")
+
+        clean_generated_sdks(str(output_dir))
+
+        assert output_dir.exists()
+        assert not stale_file.exists()
+
+    def test_typescript_template_has_explicit_root_dir(self):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", "typescript", "tsconfig.json.j2"),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        assert '"rootDir": "./src"' in contents
+
+    def test_java_template_maps_wire_enums_and_ignores_unknown_fields(self):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", "java", "MeshPack.java.j2"),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        assert "@JsonCreator" in contents
+        assert "@JsonValue" in contents
+        assert "@JsonIgnoreProperties(ignoreUnknown = true)" in contents
+
+    @pytest.mark.parametrize(
+        ("template_path", "markers"),
+        [
+            (
+                ("python", "models.py.j2"),
+                ["class ValidationFinding", "def validate_meshpack"],
+            ),
+            (
+                ("typescript", "index.ts.j2"),
+                ["export interface MeshPackValidationFinding", "export async function validateMeshPack"],
+            ),
+            (
+                ("rust", "lib.rs.j2"),
+                ["pub struct ValidationFinding", "pub fn validate_meshpack"],
+            ),
+            (
+                ("java", "MeshPack.java.j2"),
+                ["public record ValidationFinding", "public static ValidationResult validate"],
+            ),
+        ],
+    )
+    def test_sdk_templates_expose_validator_api(self, template_path, markers):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", *template_path),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        for marker in markers:
+            assert marker in contents
+
+
+class TestJavaSdkTarget:
+    """Verify the generator declares the required Java 17 SDK output target."""
+
+    def test_java_output_target_exists(self):
+        java_outputs = [path for path in MODEL_OUTPUTS if "generated/sdks/java" in path]
+        assert java_outputs, "Java SDK output directory must be part of SDK generation"

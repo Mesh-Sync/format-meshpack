@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://meshsync.net/schemas/meshpack/extensions/meshsync_dependencies.json",
+  "$id": "https://meshsync.net/schemas/meshpack/1.1/extensions/meshsync_dependencies.schema.json",
   "title": "MeshSync Dependencies Extension",
   "description": "File dependencies for multi-file formats (OBJ+MTL, FBX with textures)",
   "type": "object",

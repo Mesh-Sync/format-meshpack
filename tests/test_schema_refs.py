@@ -12,8 +12,10 @@ from pathlib import Path
 import pytest
 
 SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schema"
+REPO_DIR = SCHEMA_DIR.parent
 
 COMMON_REF_PREFIX = "common.schema.json#/definitions/"
+SCHEMA_ID_BASE = "https://meshsync.net/schemas/meshpack/1.1/"
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,27 @@ class TestCommonDefinitions:
         actual = set(common_schema.get("definitions", {}).keys())
         missing = self.EXPECTED_DEFINITIONS - actual
         assert not missing, f"common.schema.json missing definitions: {missing}"
+
+
+class TestSchemaIds:
+    def test_core_schema_ids_are_versioned(self):
+        for schema_path in sorted(SCHEMA_DIR.glob("*.schema.json")):
+            data = json.loads(schema_path.read_text(encoding="utf-8"))
+            assert data["$id"].startswith(SCHEMA_ID_BASE)
+            assert data["$id"].endswith(f"/{schema_path.name}")
+
+    def test_extension_schema_ids_are_versioned(self):
+        for schema_path in sorted((SCHEMA_DIR / "extensions").glob("*.schema.json")):
+            data = json.loads(schema_path.read_text(encoding="utf-8"))
+            assert data["$id"].startswith(f"{SCHEMA_ID_BASE}extensions/")
+            assert data["$id"].endswith(f"/{schema_path.name}")
+
+    def test_catalog_matches_version_file(self):
+        catalog = json.loads((SCHEMA_DIR / "catalog.json").read_text(encoding="utf-8"))
+        version = (REPO_DIR / "VERSION").read_text(encoding="utf-8").strip()
+
+        assert catalog["format_version"] == version
+        assert catalog["schemas"]["manifest"] == f"{SCHEMA_ID_BASE}manifest.schema.json"
 
 
 # ---------------------------------------------------------------------------

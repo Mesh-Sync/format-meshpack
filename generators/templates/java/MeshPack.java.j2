@@ -1,0 +1,412 @@
+package {{ java_package }};
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+public final class MeshPack {
+  public static final String VERSION = "{{ version }}";
+  private static final ObjectMapper MAPPER = new ObjectMapper()
+      .registerModule(new JavaTimeModule())
+      .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+  private MeshPack() {}
+
+{% macro java_type(t) -%}
+{%- if t.is_array -%}
+List<{{ java_type(t.item_type) }}>
+{%- elif t.base == "string" or t.base == "email" -%}
+String
+{%- elif t.base == "integer" -%}
+Long
+{%- elif t.base == "number" -%}
+Double
+{%- elif t.base == "boolean" -%}
+Boolean
+{%- elif t.base == "datetime" -%}
+OffsetDateTime
+{%- elif t.base == "dictionary" -%}
+Map<String, Object>
+{%- elif t.base == "unknown" -%}
+Object
+{%- else -%}
+{{ t.base }}
+{%- endif -%}
+{%- endmacro %}
+{% for model in models %}
+{% if model.name == "OSType" %}
+  public enum OSType {
+    LINUX("linux"),
+    WINDOWS("windows"),
+    DARWIN("darwin"),
+    UNKNOWN("unknown");
+
+    private final String value;
+
+    OSType(String value) {
+      this.value = value;
+    }
+
+    @JsonValue
+    public String value() {
+      return value;
+    }
+
+    @JsonCreator
+    public static OSType fromValue(String value) {
+      for (OSType os : values()) {
+        if (os.value.equals(value)) {
+          return os;
+        }
+      }
+      throw new IllegalArgumentException("Unknown OSType value: " + value);
+    }
+  }
+
+{% else %}
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record {{ model.name }}(
+{% for field in model.fields %}
+  @JsonProperty("{{ field.name }}") {{ java_type(field.type) }} {{ field.java_name }}{{ "," if not loop.last else "" }}
+{% endfor %}
+  ) {}
+
+{% endif %}
+{% endfor %}
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record MeshPackDocument(Manifest manifest, List<Shard> shards, List<FileEntry> entries) {}
+
+  public record ValidationFinding(String severity, String code, String message) {}
+
+  public record ValidationResult(List<ValidationFinding> findings) {
+    public boolean valid() {
+      return findings.stream().noneMatch(finding -> "ERROR".equals(finding.severity()));
+    }
+
+    public List<ValidationFinding> errors() {
+      return findings.stream().filter(finding -> "ERROR".equals(finding.severity())).toList();
+    }
+
+    public List<ValidationFinding> warnings() {
+      return findings.stream().filter(finding -> "WARNING".equals(finding.severity())).toList();
+    }
+  }
+
+  public static ValidationResult validate(Path path) {
+    List<ValidationFinding> findings = new ArrayList<>();
+    try (ZipFile archive = new ZipFile(path.toFile())) {
+      List<? extends ZipEntry> entries = archive.stream().toList();
+      Set<String> names = archive.stream().map(ZipEntry::getName).collect(java.util.stream.Collectors.toSet());
+      if (!entries.isEmpty() && !"manifest.json".equals(entries.get(0).getName())) {
+        findings.add(finding("WARNING", "ZIP-001", "manifest.json should be the first ZIP entry (found '" + entries.get(0).getName() + "' first)"));
+      }
+
+      long totalDecompressed = 0;
+      for (ZipEntry entry : entries) {
+        totalDecompressed += entry.getSize() < 0 ? 0 : entry.getSize();
+        if (entry.getMethod() != ZipEntry.STORED && entry.getMethod() != ZipEntry.DEFLATED) {
+          findings.add(finding("ERROR", "ZIP-003", "Entry '" + entry.getName() + "' uses unsupported compression method " + entry.getMethod()));
+        }
+        if (entry.getCompressedSize() > 0 && entry.getSize() / entry.getCompressedSize() > 100) {
+          findings.add(finding("ERROR", "ZIP-004", "Entry '" + entry.getName() + "' exceeds compression ratio limit 100:1"));
+        }
+      }
+      if (totalDecompressed > 10L * 1024L * 1024L * 1024L) {
+        findings.add(finding("ERROR", "ZIP-005", "Total decompressed size exceeds limit of 10737418240 bytes"));
+      }
+
+      if (!names.contains("manifest.json")) {
+        findings.add(finding("ERROR", "MAN-001", "manifest.json not found in archive"));
+        return new ValidationResult(findings);
+      }
+
+      Manifest manifest;
+      try {
+        manifest = MAPPER.readValue(readText(archive, "manifest.json"), Manifest.class);
+      } catch (IOException exception) {
+        findings.add(finding("ERROR", "MAN-002", "Failed to parse manifest.json: " + exception.getMessage()));
+        return new ValidationResult(findings);
+      }
+
+      if (!List.of("sha256", "sha512", "blake3").contains(manifest.hash_algo())) {
+        findings.add(finding("ERROR", "MAN-012", "Unsupported hash_algo: '" + manifest.hash_algo() + "'"));
+      }
+
+      if (manifest.shard_list() == null || manifest.shard_list().isEmpty()) {
+        findings.add(finding("ERROR", "MAN-014", "shard_list must be a non-empty array"));
+        return new ValidationResult(findings);
+      }
+
+      for (ShardReference shardRef : manifest.shard_list()) {
+        String shardPath = "index/" + shardRef.id() + ".json";
+        if (!shardRef.id().matches("^part-\\d{5}$")) {
+          findings.add(finding("WARNING", "SHD-001", "shard_id '" + shardRef.id() + "' does not match ^part-\\d{5}$"));
+        }
+        if (!names.contains(shardPath)) {
+          findings.add(finding("ERROR", "SHD-002", "Shard file missing in archive: " + shardPath));
+          continue;
+        }
+
+        String shardJson;
+        Shard shard;
+        try {
+          shardJson = readText(archive, shardPath);
+          shard = MAPPER.readValue(shardJson, Shard.class);
+        } catch (IOException exception) {
+          findings.add(finding("ERROR", "SHD-003", "Failed to parse " + shardPath + ": " + exception.getMessage()));
+          continue;
+        }
+
+        List<FileEntry> shardEntries = shard.entries() == null ? List.of() : shard.entries();
+        List<String> paths = shardEntries.stream().map(FileEntry::path).toList();
+        List<String> sortedPaths = paths.stream().sorted().toList();
+        if (!paths.equals(sortedPaths)) {
+          findings.add(finding("WARNING", "SHD-004", "Entries not sorted by path in " + shardPath));
+        }
+        if (!Long.valueOf(shardEntries.size()).equals(shardRef.entries_count())) {
+          findings.add(finding("ERROR", "SHD-005", "entries_count mismatch in " + shardPath + ": expected " + shardRef.entries_count() + ", got " + shardEntries.size()));
+        }
+        try {
+          String actualHash = computeEntriesHash(shardJson, manifest.hash_algo());
+          if (!actualHash.equals(shardRef.entries_hash())) {
+            findings.add(finding("ERROR", "SHD-007", "entries_hash mismatch in " + shardPath + ": expected " + shardRef.entries_hash() + ", got " + actualHash));
+          }
+        } catch (IllegalArgumentException exception) {
+          findings.add(finding("WARNING", "SHD-006", "Hash algo error in " + shardPath + ": " + exception.getMessage()));
+        }
+
+        for (FileEntry entry : shardEntries) {
+          validateEntryPath(entry.path(), shardPath, findings);
+          if (entry.hash() != null && !isHashValue(entry.hash())) {
+            findings.add(finding("WARNING", "HSH-001", "Hash format invalid for " + entry.path() + " in " + shardPath));
+          }
+          if (entry.resource_ref() != null && entry.resource_hash() == null) {
+            findings.add(finding("WARNING", "RES-001", shardPath + ":" + entry.path() + " has resource_ref but missing resource_hash"));
+          }
+          if (entry.resource_ref() != null && !names.contains("resources/" + entry.resource_ref())) {
+            findings.add(finding("ERROR", "RES-002", "Missing embedded resource: resources/" + entry.resource_ref()));
+          }
+          if (entry.resource_ref() != null && entry.resource_ref().contains(":")) {
+            findings.add(finding("WARNING", "RES-003", "resource_ref contains ':' in " + shardPath + ":" + entry.path()));
+          }
+        }
+      }
+    } catch (IOException exception) {
+      findings.add(finding("ERROR", "ARC-001", "Cannot open archive: " + exception.getMessage()));
+    }
+
+    return new ValidationResult(findings);
+  }
+
+  private static ValidationFinding finding(String severity, String code, String message) {
+    return new ValidationFinding(severity, code, message);
+  }
+
+  private static void validateEntryPath(String path, String shardPath, List<ValidationFinding> findings) {
+    if (path.length() > 1024) {
+      findings.add(finding("ERROR", "ENT-001", "Path exceeds 1024 chars in " + shardPath + ": " + path.substring(0, Math.min(path.length(), 80)) + "..."));
+    }
+    if (List.of(path.split("/")).contains("..")) {
+      findings.add(finding("ERROR", "ENT-002", "Path traversal detected in " + shardPath + ": " + path));
+    }
+    if (path.startsWith("/")) {
+      findings.add(finding("ERROR", "ENT-003", "Absolute path in " + shardPath + ": " + path));
+    }
+    if (path.length() >= 2 && Character.isLetter(path.charAt(0)) && path.charAt(1) == ':') {
+      findings.add(finding("ERROR", "ENT-004", "Drive letter path in " + shardPath + ": " + path));
+    }
+    if (path.startsWith("\\\\")) {
+      findings.add(finding("ERROR", "ENT-005", "UNC path in " + shardPath + ": " + path));
+    }
+  }
+
+  private static boolean isHashValue(String value) {
+    return value.matches("^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128}|blake3:[a-f0-9]{64})$");
+  }
+
+  private static String computeEntriesHash(String shardJson, String algo) {
+    try {
+      JsonNode entries = MAPPER.readTree(shardJson).get("entries");
+      List<JsonNode> sortedEntries = new ArrayList<>();
+      entries.forEach(sortedEntries::add);
+      sortedEntries.sort(Comparator.comparing(node -> node.path("path").asText("")));
+      String canonical = canonicalJson(MAPPER.valueToTree(sortedEntries));
+      byte[] digest = digest(canonical.getBytes(StandardCharsets.UTF_8), algo);
+      return algo + ":" + HexFormat.of().formatHex(digest);
+    } catch (IOException exception) {
+      throw new IllegalArgumentException(exception.getMessage(), exception);
+    }
+  }
+
+  private static byte[] digest(byte[] bytes, String algo) {
+    try {
+      return switch (algo) {
+        case "sha256" -> MessageDigest.getInstance("SHA-256").digest(bytes);
+        case "sha512" -> MessageDigest.getInstance("SHA-512").digest(bytes);
+        case "blake3" -> throw new IllegalArgumentException("BLAKE3 hashing is not available in the Java SDK runtime");
+        default -> throw new IllegalArgumentException("Unsupported hash algorithm: " + algo);
+      };
+    } catch (NoSuchAlgorithmException exception) {
+      throw new IllegalArgumentException(exception.getMessage(), exception);
+    }
+  }
+
+  private static String canonicalJson(JsonNode node) {
+    if (node == null || node.isNull()) {
+      return "null";
+    }
+    if (node.isBoolean() || node.isNumber()) {
+      return node.asText();
+    }
+    if (node.isTextual()) {
+      try {
+        return MAPPER.writeValueAsString(node.asText());
+      } catch (IOException exception) {
+        throw new IllegalArgumentException(exception.getMessage(), exception);
+      }
+    }
+    if (node.isArray()) {
+      List<String> values = new ArrayList<>();
+      node.forEach(item -> values.add(canonicalJson(item)));
+      return "[" + String.join(",", values) + "]";
+    }
+    List<String> keys = new ArrayList<>();
+    Iterator<String> iterator = node.fieldNames();
+    iterator.forEachRemaining(keys::add);
+    keys.sort(String::compareTo);
+    List<String> pairs = new ArrayList<>();
+    for (String key : keys) {
+      try {
+        pairs.add(MAPPER.writeValueAsString(key) + ":" + canonicalJson(node.get(key)));
+      } catch (IOException exception) {
+        throw new IllegalArgumentException(exception.getMessage(), exception);
+      }
+    }
+    return "{" + String.join(",", pairs) + "}";
+  }
+
+  public static final class Reader implements AutoCloseable {
+    private final ZipFile archive;
+
+    public Reader(Path path) throws IOException {
+      this.archive = new ZipFile(path.toFile());
+    }
+
+    public String readManifestJson() throws IOException {
+      return readText("manifest.json");
+    }
+
+    public Manifest readManifest() throws IOException {
+      return MAPPER.readValue(readManifestJson(), Manifest.class);
+    }
+
+    public List<String> readShardJsonDocuments() throws IOException {
+      List<String> shards = new ArrayList<>();
+      for (ZipEntry entry : archive.stream().filter(e -> e.getName().startsWith("index/") && e.getName().endsWith(".json")).sorted((a, b) -> a.getName().compareTo(b.getName())).toList()) {
+        shards.add(readText(entry.getName()));
+      }
+      return shards;
+    }
+
+    public List<Shard> readShards() throws IOException {
+      List<Shard> shards = new ArrayList<>();
+      for (String shardJson : readShardJsonDocuments()) {
+        shards.add(MAPPER.readValue(shardJson, Shard.class));
+      }
+      return shards;
+    }
+
+    public MeshPackDocument readDocument() throws IOException {
+      Manifest manifest = readManifest();
+      List<Shard> shards = readShards();
+      List<FileEntry> entries = new ArrayList<>();
+      for (Shard shard : shards) {
+        if (shard.entries() != null) {
+          entries.addAll(shard.entries());
+        }
+      }
+      return new MeshPackDocument(manifest, shards, entries);
+    }
+
+    public List<String> listEntryNames() {
+      return archive.stream().map(ZipEntry::getName).toList();
+    }
+
+    public Optional<byte[]> readResource(String resourceRef) throws IOException {
+      if (resourceRef == null || resourceRef.isBlank()) {
+        return Optional.empty();
+      }
+      ZipEntry entry = archive.getEntry("resources/" + resourceRef);
+      return entry == null ? Optional.empty() : Optional.of(readBytes(entry));
+    }
+
+    private String readText(String entryName) throws IOException {
+      ZipEntry entry = archive.getEntry(entryName);
+      if (entry == null) {
+        throw new IOException(entryName + " not found in archive");
+      }
+      return new String(readBytes(entry), StandardCharsets.UTF_8);
+    }
+
+    private byte[] readBytes(ZipEntry entry) throws IOException {
+      try (InputStream input = archive.getInputStream(entry); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+        input.transferTo(output);
+        return output.toByteArray();
+      }
+    }
+
+    @Override
+    public void close() throws IOException {
+      archive.close();
+    }
+  }
+
+  private static String readText(ZipFile archive, String entryName) throws IOException {
+    ZipEntry entry = archive.getEntry(entryName);
+    if (entry == null) {
+      throw new IOException(entryName + " not found in archive");
+    }
+    try (InputStream input = archive.getInputStream(entry); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+      input.transferTo(output);
+      return output.toString(StandardCharsets.UTF_8);
+    }
+  }
+
+{% for ext in extensions %}
+{% for version_name, ext_models in ext.version_models.items() %}
+{% for model in ext_models %}
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record {{ model.name }}(
+{% for field in model.fields %}
+  @JsonProperty("{{ field.name }}") {{ java_type(field.type) }} {{ field.java_name }}{{ "," if not loop.last else "" }}
+{% endfor %}
+  ) {}
+
+{% endfor %}
+{% endfor %}
+{% endfor %}
+}

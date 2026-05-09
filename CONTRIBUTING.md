@@ -43,7 +43,7 @@ Contributions to the format specification (in `definition/README.md`) should:
 1. Be backwards-compatible whenever possible
 2. Include rationale for the change
 3. Update JSON schemas accordingly
-4. Consider impact on all three SDK implementations
+4. Consider impact on all four SDK implementations: Python, Rust, TypeScript, and Java 17
 
 ## Development Workflow
 
@@ -52,6 +52,7 @@ Contributions to the format specification (in `definition/README.md`) should:
 - **Python 3.10+** (for SDK generators)
 - **Node.js 18+** (for TypeScript SDK)
 - **Rust 1.70+** (for Rust SDK)
+- **Java 17+ and Maven 3.9+** (for Java SDK)
 - **Just** command runner ([installation guide](https://github.com/casey/just))
 
 Install Python dependencies:
@@ -68,7 +69,7 @@ JSON Schemas (source of truth)
     ↓
 Python Generator (generate_sdks.py)
     ↓
-Auto-generated SDKs (Python, Rust, TypeScript)
+Auto-generated SDKs (Python, Rust, TypeScript, Java 17)
 ```
 
 **Never edit generated code directly!** All changes must flow through schemas and templates.
@@ -102,7 +103,7 @@ just validate
 If you need to change how SDKs are generated:
 
 - **Logic changes**: Edit `generators/generate_sdks.py`
-- **Template changes**: Edit files in `generators/templates/{python,rust,typescript}/`
+- **Template changes**: Edit files in `generators/templates/{python,rust,typescript,java}/`
 
 #### 4. Regenerate SDKs
 
@@ -122,6 +123,7 @@ This will:
 - Build Python wheel package
 - Compile Rust crate
 - Compile TypeScript package
+- Compile Java 17 Maven package
 
 ### Full Workflow Example
 
@@ -141,11 +143,10 @@ just generate
 # 5. Validate schemas
 just validate
 
-# 6. Compile all SDKs
-just compile
+# 6. Run the full public-readiness dry run
+just publish-dry-run
 
-# 7. Test manually (until automated tests exist)
-# Create a sample .meshpack, verify it works
+# 7. Review generated package output
 
 # 8. Commit changes (schemas + templates + docs, NOT generated/)
 git add schema/ definition/ generators/
@@ -175,7 +176,7 @@ git push origin feature/add-compression-metadata
 3. **Make your changes** following the workflow above
 4. **Test thoroughly**:
    - Schemas validate (`just validate`)
-   - SDKs compile (`just compile`)
+   - SDKs compile and package (`just publish-dry-run`)
    - Generated code works as expected
 5. **Write clear commit messages** (see conventions below)
 6. **Update documentation** if needed
@@ -186,7 +187,7 @@ git push origin feature/add-compression-metadata
 Before submitting, ensure:
 
 - [ ] Schemas validate successfully
-- [ ] All three SDKs compile without errors
+- [ ] All four SDKs compile and package without errors
 - [ ] Documentation is updated (if applicable)
 - [ ] Commit messages follow conventions
 - [ ] No generated files are committed (check `.gitignore`)

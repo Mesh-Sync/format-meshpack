@@ -1,82 +1,112 @@
-name: Flash CI
+name: MeshPack CI
 
 on:
   push:
-    branches: [ master ]
-    tags: [ 'v*' ]
+    branches: [main, master, develop]
+    tags: ['v*']
   pull_request:
-    branches: [ master ]
+    branches: [main, master, develop]
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
-    runs-on: self-hosted
-    
+    runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Install Just
-      uses: extractions/setup-just@v1
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
 
-    - name: Install Python Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Install Just
+        uses: extractions/setup-just@v2
 
-    - name: Generate SDKs
-      run: just generate
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Validate Schemas
-      run: just validate
+      - name: Generate, Validate, Lint, Test, Compile
+        run: just all
 
-    - name: Lint Code
-      run: just lint
-
-    - name: Test SDKs
-      run: just test
-
-    - name: Compile SDKs
-      run: just compile
+      - name: Package Dry Run
+        run: just publish-dry-run
 
   publish:
     needs: build-and-test
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    environment: release
+
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: extractions/setup-just@v1
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Generate and Compile
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: https://registry.npmjs.org
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Install Just
+        uses: extractions/setup-just@v2
+
+      - name: Install Python Dependencies
         run: |
-          just generate
-          just compile
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Release Artifacts
+        run: just publish-dry-run
+
+      - name: Create Attestable Package Artifacts
+        run: |
+          cd generated/sdks/typescript
+          npm pack
+          cd ../rust/meshpack
+          cargo package --allow-dirty
+
+      - name: Verify Release Tag Version
+        run: |
+          test "$(cat VERSION)" = "${GITHUB_REF_NAME#v}"
+          python tools/check_generated_versions.py
 
       - name: Publish Python
         env:
@@ -91,7 +121,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd generated/sdks/typescript
-          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > .npmrc
           npm publish --access public
 
       - name: Publish Cargo
@@ -101,22 +130,35 @@ jobs:
           cd generated/sdks/rust/meshpack
           cargo publish
 
+      - name: Package Java
+        run: |
+          cd generated/sdks/java/meshpack
+          mvn -q package
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: meshpack-release-artifacts-${{ github.ref_name }}
+          path: |
+            generated/sdks/python/dist/*
+            generated/sdks/typescript/*.tgz
+            generated/sdks/rust/meshpack/target/package/*.crate
+            generated/sdks/java/meshpack/target/*.jar
+
+      - name: Attest Release Artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            generated/sdks/python/dist/*
+            generated/sdks/typescript/*.tgz
+            generated/sdks/rust/meshpack/target/package/*.crate
+            generated/sdks/java/meshpack/target/*.jar
+
       - name: Verify Published Packages
         run: |
-          echo "Waiting for registries to index new packages..."
-          sleep 30
-
           PKG_VERSION="${GITHUB_REF_NAME#v}"
-
-          echo "--- Verifying NPM package ---"
-          npm view @meshsync/meshpack@"$PKG_VERSION" version
-
-          echo "--- Verifying PyPI package ---"
+          npm view @mesh-sync/meshpack@"$PKG_VERSION" version
           pip index versions meshpack 2>/dev/null | grep -q "$PKG_VERSION" \
             || echo "Warning: PyPI verification requires pip 21.2+; check manually."
-
-          echo "--- Verifying Crates.io package ---"
           curl -sf "https://crates.io/api/v1/crates/meshpack/$PKG_VERSION" \
             | python3 -c "import sys,json; v=json.load(sys.stdin)['version']['num']; print(f'crates.io: {v}')"
-
-          echo "All packages verified."
