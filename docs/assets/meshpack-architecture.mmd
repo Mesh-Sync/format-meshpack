@@ -1,0 +1,28 @@
+flowchart LR
+    subgraph Sources[Messy storage world]
+        Local[Local folders]
+        Cloud[NAS and cloud drives]
+        Buckets[S3 buckets]
+        Markets[Marketplace exports]
+    end
+
+    Connector[Storage connector]
+    Pack[(MeshPack snapshot<br/>.meshpack / .mpack ZIP)]
+    Manifest[manifest.json<br/>first archive entry]
+    Shards[index/ shards<br/>deterministic file list]
+    Resources[resources/<br/>previews and small files]
+    Sidecar[.meshpack.integrity<br/>detached pack hash]
+    Validator[Integrity and conformance validation]
+    Workers[Provider-agnostic workers]
+    Consumers[Importers, viewers, marketplaces]
+
+    Sources --> Connector --> Pack
+    Pack --> Manifest
+    Pack --> Shards
+    Pack --> Resources
+    Sidecar -. verifies .-> Pack
+    Manifest --> Validator
+    Shards --> Validator
+    Resources --> Validator
+    Sidecar --> Validator
+    Validator --> Workers --> Consumers

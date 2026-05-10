@@ -18,6 +18,12 @@ MeshPack (`.meshpack`) is a ZIP-based container format designed to solve the fra
 - **Indices**: Sharded search indices for fast local access without unpacking.
 - **Portability**: Self-contained "files" that act like databases.
 
+## Visual Overview
+
+![MeshPack architecture flow](docs/assets/meshpack-architecture.svg)
+
+MeshPack is the handoff object between provider-specific storage discovery and provider-agnostic processing. Storage connectors create a deterministic archive, validators prove integrity and conformance, and downstream workers or importers can operate without re-learning the source storage system. The Mermaid source for this diagram lives at [docs/assets/meshpack-architecture.mmd](docs/assets/meshpack-architecture.mmd), and the design rationale is expanded in [Designing MeshPack: How Standards Emerge from Real 3D Model Workflows](http://127.0.0.1:4322/blog/designing-meshpack-standard/).
+
 ## Repository Structure
 
 - **[`definition/`](definition/README.md)**: The human-readable specification (RFC-style). **Start here.**
