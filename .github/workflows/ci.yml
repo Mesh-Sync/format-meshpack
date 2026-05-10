@@ -38,7 +38,7 @@ jobs:
           cache: maven
 
       - name: Install Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
 
       - name: Install Python Dependencies
         run: |
@@ -83,7 +83,7 @@ jobs:
           cache: maven
 
       - name: Install Just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
 
       - name: Install Python Dependencies
         run: |

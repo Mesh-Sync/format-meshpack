@@ -40,7 +40,7 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - name: Generate SDKs
         run: just generate
       - name: Public artifact hygiene
@@ -92,7 +92,7 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - name: Build dry-run artifacts
         run: |
           python -m pip install --upgrade pip
