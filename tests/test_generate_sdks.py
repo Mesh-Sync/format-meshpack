@@ -290,9 +290,12 @@ class TestGenerationReleaseReadiness:
         vectors = load_sdk_validation_vectors()
 
         ids = {vector["id"] for vector in vectors["vectors"]}
+        signature_ids = {vector["id"] for vector in vectors["signature_vectors"]}
 
         assert "jcs-utf16-key-order" in ids
+        assert "invalid-base64-signature" in signature_ids
         assert all("entry_json" in vector for vector in vectors["vectors"])
+        assert all("signatures_json" in vector for vector in vectors["signature_vectors"])
 
     def test_generator_schema_audit_accepts_current_schemas(self):
         audit_generator_inputs()
@@ -310,6 +313,32 @@ class TestGenerationReleaseReadiness:
         with pytest.raises(ValueError, match="Generator schema audit failed"):
             audit_generator_inputs(str(schema_dir), str(extensions_dir))
 
+    @pytest.mark.parametrize(
+        "schema_fragment",
+        [
+            {"type": "object", "properties": {"value": {"anyOf": [{"type": "string"}, {"type": "integer"}]}}},
+            {"type": "object", "properties": {"value": {"type": ["string", "integer", "null"]}}},
+            {"type": "object", "properties": {"value": {"type": "array", "items": [{"type": "string"}]}}},
+            {"type": "object", "additionalProperties": {"type": "string"}},
+            {"type": "object", "properties": {"value": {"const": True}}},
+        ],
+    )
+    def test_generator_schema_audit_rejects_unsupported_codegen_constructs(self, tmp_path, schema_fragment):
+        schema_dir = tmp_path / "schema"
+        extensions_dir = schema_dir / "extensions"
+        schema_dir.mkdir()
+        extensions_dir.mkdir()
+        (schema_dir / "unsupported.schema.json").write_text(
+            json.dumps({"$schema": "http://json-schema.org/draft-07/schema#", **schema_fragment}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="unsupported JSON Schema construct|nullable type arrays|tuple array schemas|additionalProperties"):
+            audit_generator_inputs(str(schema_dir), str(extensions_dir))
+
+    def test_generator_schema_audit_allows_documented_legacy_deleted_const(self):
+        audit_generator_inputs()
+
     def test_clean_generated_sdks_removes_stale_files(self, tmp_path):
         output_dir = tmp_path / "generated" / "sdks"
         stale_file = output_dir / "typescript" / "stale.js"
@@ -319,6 +348,20 @@ class TestGenerationReleaseReadiness:
         clean_generated_sdks(str(output_dir))
 
         assert output_dir.exists()
+        assert not stale_file.exists()
+
+    def test_clean_generated_sdks_preserves_ignored_build_dirs(self, tmp_path):
+        output_dir = tmp_path / "generated" / "sdks"
+        build_file = output_dir / "rust" / "meshpack" / "target" / "debug" / "deps" / "active.rmeta"
+        build_file.parent.mkdir(parents=True)
+        build_file.write_text("active", encoding="utf-8")
+        stale_file = output_dir / "rust" / "meshpack" / "src" / "stale.rs"
+        stale_file.parent.mkdir(parents=True)
+        stale_file.write_text("stale", encoding="utf-8")
+
+        clean_generated_sdks(str(output_dir))
+
+        assert build_file.exists()
         assert not stale_file.exists()
 
     def test_typescript_template_has_explicit_root_dir(self):
@@ -370,6 +413,40 @@ class TestGenerationReleaseReadiness:
         assert "@JsonCreator" in contents
         assert "@JsonValue" in contents
         assert "@JsonIgnoreProperties(ignoreUnknown = true)" in contents
+
+    def test_signature_templates_use_strict_base64_and_no_tail_slicing(self):
+        template_paths = [
+            ("python", "models.py.j2"),
+            ("typescript", "index.ts.j2"),
+            ("java", "MeshPack.java.j2"),
+            ("rust", "lib.rs.j2"),
+        ]
+        contents = {}
+        for template_path in template_paths:
+            with open(
+                os.path.join(REPO_ROOT, "generators", "templates", *template_path),
+                "r",
+                encoding="utf-8",
+            ) as template:
+                contents[template_path[0]] = template.read()
+
+        assert "validate=True" in contents["python"]
+        assert "decodeStrictBase64" in contents["typescript"]
+        assert "publicKeyBytes.length > 32" not in contents["java"]
+        assert "public_key_bytes[public_key_bytes.len() - 32..]" not in contents["rust"]
+        assert "Ed25519 public key must be raw 32-byte or SPKI/DER" in contents["rust"]
+
+    def test_rust_template_supports_rsa_pss_signatures(self):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", "rust", "lib.rs.j2"),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        assert "rsa-pss-sha256" in contents
+        assert "RsaPublicKey::from_public_key_der" in contents
+        assert "pss::VerifyingKey::<Sha256>" in contents
 
     @pytest.mark.parametrize(
         ("template_path", "markers"),
@@ -485,6 +562,7 @@ class TestGenerationReleaseReadiness:
 
         assert "jcs-utf16-key-order" in contents
         assert "JCS_UTF16_VECTOR_ENTRIES_HASH" in contents
+        assert "invalid-base64-signature" in contents
 
 
 class TestJavaSdkTarget:

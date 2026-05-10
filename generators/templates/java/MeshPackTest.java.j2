@@ -25,6 +25,14 @@ class MeshPackTest {
   private static final String JCS_UTF16_VECTOR_ENTRIES_HASH = "{{ vector.entries_hash }}";
 {% endif %}
 {% endfor %}
+{% for vector in sdk_validation_vectors.signature_vectors %}
+{% if vector.id == "invalid-base64-signature" %}
+  private static final String INVALID_SIGNATURE_VECTOR_JSON = """
+      {{ vector.signatures_json }}
+      """;
+  private static final String INVALID_SIGNATURE_EXPECTED_CODE = "{{ vector.expected_error_code }}";
+{% endif %}
+{% endfor %}
 
   @Test
   void readerAcceptsWireEnumsAndUnknownFields() throws Exception {
@@ -132,6 +140,27 @@ class MeshPackTest {
   }
 
   @Test
+  void validatorReportsInvalidSignatureBase64() throws Exception {
+    Path archive = Files.createTempFile("meshpack-java-sdk-invalid-signature", ".mpack");
+    Path sidecar = Path.of(archive.toString() + ".integrity");
+    try {
+      try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+        writeEntry(zip, "manifest.json", manifest(0, EMPTY_ENTRIES_HASH));
+        writeEntry(zip, "index/part-00001.json", shard("[]", EMPTY_ENTRIES_HASH));
+      }
+        writeSidecar(archive, sidecar, INVALID_SIGNATURE_VECTOR_JSON.trim());
+
+      MeshPack.ValidationResult result = MeshPack.validate(archive, true);
+
+      assertFalse(result.valid());
+      assertTrue(result.errors().stream().anyMatch(finding -> INVALID_SIGNATURE_EXPECTED_CODE.equals(finding.code())));
+    } finally {
+      Files.deleteIfExists(sidecar);
+      Files.deleteIfExists(archive);
+    }
+  }
+
+  @Test
   void validatorReportsUnsafeResourceRef() throws Exception {
     Path archive = Files.createTempFile("meshpack-java-sdk-unsafe-resource", ".mpack");
     String bogusHash = "sha256:" + "0".repeat(64);
@@ -222,6 +251,10 @@ class MeshPackTest {
   }
 
   private static void writeSidecar(Path archive, Path sidecar) throws Exception {
+    writeSidecar(archive, sidecar, "[]");
+  }
+
+  private static void writeSidecar(Path archive, Path sidecar, String signaturesJson) throws Exception {
     byte[] archiveBytes = Files.readAllBytes(archive);
     String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(archiveBytes));
     Files.writeString(sidecar, """
@@ -231,9 +264,9 @@ class MeshPackTest {
           "hash_algo": "sha256",
           "pack_hash": "sha256:%s",
           "computed_at": "2026-05-09T00:00:00Z",
-          "signatures": []
+          "signatures": %s
         }
-        """.formatted(archive.getFileName(), archiveBytes.length, digest));
+        """.formatted(archive.getFileName(), archiveBytes.length, digest, signaturesJson));
   }
 
   private static void writeEntry(ZipOutputStream zip, String name, String contents) throws Exception {

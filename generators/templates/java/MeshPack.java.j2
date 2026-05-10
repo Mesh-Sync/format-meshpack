@@ -17,7 +17,6 @@ import java.security.spec.PSSParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -444,12 +443,6 @@ Object
       spkiBytes = new byte[prefix.length + publicKeyBytes.length];
       System.arraycopy(prefix, 0, spkiBytes, 0, prefix.length);
       System.arraycopy(publicKeyBytes, 0, spkiBytes, prefix.length, publicKeyBytes.length);
-    } else if (publicKeyBytes.length > 32 && publicKeyBytes.length != 44) {
-      byte[] prefix = HexFormat.of().parseHex("302a300506032b6570032100");
-      byte[] rawKey = Arrays.copyOfRange(publicKeyBytes, publicKeyBytes.length - 32, publicKeyBytes.length);
-      spkiBytes = new byte[prefix.length + rawKey.length];
-      System.arraycopy(prefix, 0, spkiBytes, 0, prefix.length);
-      System.arraycopy(rawKey, 0, spkiBytes, prefix.length, rawKey.length);
     }
     return KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(spkiBytes));
   }

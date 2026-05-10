@@ -43,6 +43,8 @@ jobs:
       - uses: extractions/setup-just@v2
       - name: Generate SDKs
         run: just generate
+      - name: Public artifact hygiene
+        run: just artifact-hygiene
       - name: Python audit
         run: |
           python -m pip install --upgrade pip pip-audit
@@ -96,6 +98,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           just publish-dry-run
+          just check-clean
       - name: Create attestable package artifacts
         run: |
           cd generated/sdks/typescript

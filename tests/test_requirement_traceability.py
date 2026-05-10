@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS_DIR = REPO_ROOT / "definition" / "requirements"
 CONFORMANCE_DIR = REPO_ROOT / "tests" / "conformance"
 REQUIREMENT_COVERAGE_FILE = REPO_ROOT / "tests" / "requirement_coverage.json"
+REQUIREMENT_COVERAGE_DOC = REPO_ROOT / "docs" / "REQUIREMENT_COVERAGE.md"
 
 
 def _requirement_ids() -> dict[str, str]:
@@ -131,3 +132,11 @@ def test_coverage_evidence_paths_exist() -> None:
                 missing.append(f"{requirement_id}: {evidence_path}")
 
     assert not missing, "Coverage evidence paths do not exist: " + ", ".join(sorted(missing))
+
+
+def test_public_coverage_doc_lists_all_coverage_records() -> None:
+    coverage = _requirement_coverage()
+    doc = REQUIREMENT_COVERAGE_DOC.read_text(encoding="utf-8")
+    missing = sorted(requirement_id for requirement_id in coverage if requirement_id not in doc)
+
+    assert not missing, "Coverage records missing from public docs: " + ", ".join(missing)

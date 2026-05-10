@@ -23,4 +23,4 @@ We appreciate your responsible disclosure and will credit you in the changelog o
 
 ## Supply Chain Controls
 
-Public release CI runs schema validation, generated SDK builds, dependency audits, secret scanning, SBOM generation, and artifact provenance attestations. Release artifacts should not be promoted unless these checks complete successfully.
+Public release CI runs schema validation, generated SDK builds, public artifact hygiene checks, dependency audits, secret scanning, clean-worktree checks, SBOM generation, and artifact provenance attestations. Release artifacts should not be promoted unless these checks complete successfully.

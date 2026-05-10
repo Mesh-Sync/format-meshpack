@@ -12,6 +12,12 @@ const JCS_UTF16_VECTOR_ENTRY = {{ vector.entry_json }} as FileEntry;
 const JCS_UTF16_VECTOR_ENTRIES_HASH = "{{ vector.entries_hash }}";
 {% endif %}
 {% endfor %}
+{% for vector in sdk_validation_vectors.signature_vectors %}
+{% if vector.id == "invalid-base64-signature" %}
+const INVALID_SIGNATURE_VECTOR = {{ vector.signatures_json }};
+const INVALID_SIGNATURE_EXPECTED_CODE = "{{ vector.expected_error_code }}";
+{% endif %}
+{% endfor %}
 
 function manifest(entriesCount = 0, entriesHash = EMPTY_ENTRIES_HASH, formatVersion = "{{ version }}"): Manifest {
   return {
@@ -56,6 +62,23 @@ test("validator accepts a minimal archive with sidecar hash verification", async
 
   assert.equal(result.valid, true, JSON.stringify(result.findings));
   assert.ok(result.findings.some((finding) => finding.code === "SDC-010"));
+});
+
+test("validator reports SIG-003 for invalid signature base64", async () => {
+  const archive = await writeMeshPack({ manifest: manifest(), shards: [shard()] });
+  const sidecar = {
+    ...sidecarFor(archive),
+    signatures: INVALID_SIGNATURE_VECTOR,
+  };
+
+  const result = await validateMeshPack(archive, {
+    archiveName: "sdk-parity.mpack",
+    sidecar,
+    verifySignatures: true,
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((finding) => finding.code === INVALID_SIGNATURE_EXPECTED_CODE));
 });
 
 test("validator reports MAN-001 for archives without manifest.json", async () => {

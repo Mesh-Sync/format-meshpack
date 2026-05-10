@@ -1210,8 +1210,8 @@ def verify_signature_entries(
             continue
 
         try:
-            pub_key_bytes = base64.b64decode(pub_key_b64)
-            sig_bytes = base64.b64decode(sig_b64)
+            pub_key_bytes = base64.b64decode(pub_key_b64, validate=True)
+            sig_bytes = base64.b64decode(sig_b64, validate=True)
         except Exception as exc:
             findings.append(
                 Finding(Severity.ERROR, "SIG-003",
@@ -1221,8 +1221,12 @@ def verify_signature_entries(
 
         if alg == "ed25519":
             try:
-                key_bytes = pub_key_bytes if len(pub_key_bytes) == 32 else pub_key_bytes[-32:]
-                key = Ed25519PublicKey.from_public_bytes(key_bytes)
+                if len(pub_key_bytes) == 32:
+                    key = Ed25519PublicKey.from_public_bytes(pub_key_bytes)
+                else:
+                    key = load_der_public_key(pub_key_bytes)
+                    if not isinstance(key, Ed25519PublicKey):
+                        raise ValueError("Ed25519 public key must be raw 32-byte or SPKI/DER")
                 key.verify(sig_bytes, signed_data)
                 findings.append(
                     Finding(Severity.INFO, "SIG-010",

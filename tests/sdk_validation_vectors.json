@@ -21,5 +21,19 @@
       },
       "entries_hash": "sha256:f71fce534643b626a57c5c78ca1827815b2ee65991cd8fc0182ad3261ed402c9"
     }
+  ],
+  "signature_vectors": [
+    {
+      "id": "invalid-base64-signature",
+      "description": "Signature vector with invalid base64 public key and signature fields",
+      "signatures": [
+        {
+          "alg": "ed25519",
+          "public_key": "!!!!",
+          "signature": "also-not-base64"
+        }
+      ],
+      "expected_error_code": "SIG-003"
+    }
   ]
 }

@@ -270,16 +270,21 @@ def _verify_signature_entries(signatures: List[Dict[str, Any]], pack_hash: str) 
             continue
 
         try:
-            public_key_bytes = base64.b64decode(public_key)
-            signature_bytes = base64.b64decode(signature)
+            public_key_bytes = base64.b64decode(public_key, validate=True)
+            signature_bytes = base64.b64decode(signature, validate=True)
         except Exception as exc:
             findings.append(_finding("ERROR", "SIG-003", f"{signer}: invalid base64 encoding — {exc}"))
             continue
 
         if alg == "ed25519":
             try:
-                key_bytes = public_key_bytes[-32:] if len(public_key_bytes) != 32 else public_key_bytes
-                Ed25519PublicKey.from_public_bytes(key_bytes).verify(signature_bytes, signed_data)
+                if len(public_key_bytes) == 32:
+                    key = Ed25519PublicKey.from_public_bytes(public_key_bytes)
+                else:
+                    key = load_der_public_key(public_key_bytes)
+                    if not isinstance(key, Ed25519PublicKey):
+                        raise ValueError("Ed25519 public key must be raw 32-byte or SPKI/DER")
+                key.verify(signature_bytes, signed_data)
                 findings.append(_finding("INFO", "SIG-010", f"{signer}: Ed25519 signature verified successfully"))
             except Exception as exc:
                 findings.append(_finding("ERROR", "SIG-004", f"{signer}: Ed25519 signature verification failed — {exc}"))

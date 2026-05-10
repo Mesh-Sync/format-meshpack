@@ -45,11 +45,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate, Validate, Lint, Test, Compile
-        run: just all
-
-      - name: Package Dry Run
-        run: just publish-dry-run
+      - name: Public Readiness Gate
+        run: just public-readiness
 
   publish:
     needs: build-and-test
@@ -96,6 +93,9 @@ jobs:
       - name: Build Release Artifacts
         run: just publish-dry-run
 
+      - name: Verify Release Worktree Cleanliness
+        run: just check-clean
+
       - name: Create Attestable Package Artifacts
         run: |
           cd generated/sdks/typescript
@@ -133,7 +133,7 @@ jobs:
       - name: Package Java
         run: |
           cd generated/sdks/java/meshpack
-          mvn -q package
+          mvn -q clean package
 
       - name: Upload Release Artifacts
         uses: actions/upload-artifact@v4

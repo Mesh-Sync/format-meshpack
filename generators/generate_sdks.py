@@ -2,7 +2,6 @@ import copy
 import json
 import os
 import re
-import shutil
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from jinja2 import Environment, FileSystemLoader
@@ -11,6 +10,7 @@ from jinja2 import Environment, FileSystemLoader
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(BASE_DIR)
 VERSION_FILE = os.path.join(REPO_DIR, "VERSION")
+LICENSE_FILE = os.path.join(REPO_DIR, "LICENSE")
 SDK_VALIDATION_VECTORS_FILE = os.path.join(REPO_DIR, "tests", "sdk_validation_vectors.json")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 OUTPUT_DIR = os.path.join(REPO_DIR, "generated", "sdks")
@@ -33,6 +33,34 @@ MODEL_OUTPUTS = [
         "meshpack",
     ),
 ]
+
+UNSUPPORTED_CODEGEN_SCHEMA_KEYS = {
+    "oneOf",
+    "anyOf",
+    "patternProperties",
+    "if",
+    "then",
+    "else",
+    "dependentSchemas",
+    "dependencies",
+    "not",
+}
+
+ALLOWED_SCHEMA_CONSTRUCTS = {
+    ("shard.schema.json", "/definitions/fileEntry/properties/extensions/properties/_deleted/const"),
+}
+
+JSON_SCHEMA_TYPES = {"array", "boolean", "integer", "null", "number", "object", "string"}
+
+PRESERVED_GENERATED_DIRS = {
+    ".mypy_cache",
+    ".pytest_cache",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+}
 
 RUST_RESERVED = {
     "as", "break", "const", "continue", "crate", "else", "enum", "extern",
@@ -81,7 +109,18 @@ def load_sdk_validation_vectors(path: str = SDK_VALIDATION_VECTORS_FILE) -> Dict
         )
         vectors.append(normalized)
 
-    return {"version": data.get("version"), "vectors": vectors}
+    signature_vectors = []
+    for vector in data.get("signature_vectors", []):
+        normalized = dict(vector)
+        normalized["signatures_json"] = json.dumps(
+            vector["signatures"],
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        signature_vectors.append(normalized)
+
+    return {"version": data.get("version"), "vectors": vectors, "signature_vectors": signature_vectors}
 
 
 def _schema_pointer_get(schema: Dict[str, Any], pointer: str) -> Any:
@@ -104,6 +143,50 @@ def _walk_schema_nodes(node: Any) -> Iterable[Dict[str, Any]]:
             yield from _walk_schema_nodes(item)
 
 
+def _walk_schema_nodes_with_path(node: Any, path: str = "") -> Iterable[Tuple[str, Dict[str, Any]]]:
+    if isinstance(node, dict):
+        yield path, node
+        for key, value in node.items():
+            escaped_key = str(key).replace("~", "~0").replace("/", "~1")
+            child_path = f"{path}/{escaped_key}" if path else f"/{escaped_key}"
+            yield from _walk_schema_nodes_with_path(value, child_path)
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            child_path = f"{path}/{index}" if path else f"/{index}"
+            yield from _walk_schema_nodes_with_path(item, child_path)
+
+
+def _audit_codegen_schema_features(source_name: str, schema: Dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+    for path, node in _walk_schema_nodes_with_path(schema):
+        for key in sorted(UNSUPPORTED_CODEGEN_SCHEMA_KEYS & set(node)):
+            errors.append(f"{source_name}{path}: unsupported JSON Schema construct {key!r} for SDK generation")
+
+        if "const" in node and (source_name, f"{path}/const") not in ALLOWED_SCHEMA_CONSTRUCTS:
+            errors.append(f"{source_name}{path}: unsupported JSON Schema construct 'const' for SDK generation")
+
+        schema_type = node.get("type")
+        if isinstance(schema_type, list):
+            non_null_types = [item for item in schema_type if item != "null"]
+            if len(non_null_types) != 1 or any(item not in JSON_SCHEMA_TYPES for item in schema_type):
+                errors.append(
+                    f"{source_name}{path}: nullable type arrays must contain exactly one non-null JSON Schema type"
+                )
+
+        items = node.get("items")
+        if isinstance(items, list):
+            errors.append(f"{source_name}{path}/items: tuple array schemas are unsupported for SDK generation")
+
+        additional_properties = node.get("additionalProperties")
+        if isinstance(additional_properties, dict):
+            errors.append(
+                f"{source_name}{path}/additionalProperties: "
+                "schema-valued additionalProperties is unsupported for SDK generation"
+            )
+
+    return errors
+
+
 def audit_generator_inputs(schema_dir: str = SCHEMA_DIR, extensions_dir: str = EXTENSIONS_DIR) -> None:
     schemas: Dict[str, Dict[str, Any]] = {}
 
@@ -122,6 +205,7 @@ def audit_generator_inputs(schema_dir: str = SCHEMA_DIR, extensions_dir: str = E
 
     errors: List[str] = []
     for source_name, schema in schemas.items():
+        errors.extend(_audit_codegen_schema_features(source_name, schema))
         for node in _walk_schema_nodes(schema):
             ref = node.get("$ref")
             if not isinstance(ref, str):
@@ -141,9 +225,23 @@ def audit_generator_inputs(schema_dir: str = SCHEMA_DIR, extensions_dir: str = E
         raise ValueError("Generator schema audit failed:\n" + "\n".join(f"- {error}" for error in errors))
 
 
+def _clean_generated_tree(path: str) -> None:
+    for entry in os.scandir(path):
+        if entry.name in PRESERVED_GENERATED_DIRS:
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            _clean_generated_tree(entry.path)
+            try:
+                os.rmdir(entry.path)
+            except OSError:
+                pass
+        else:
+            os.unlink(entry.path)
+
+
 def clean_generated_sdks(output_dir: str = OUTPUT_DIR) -> None:
     if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+        _clean_generated_tree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
 
@@ -524,6 +622,11 @@ def _write_text(path: str, text: str) -> None:
     print(f"Generated: {path}")
 
 
+def _write_package_license(path: str) -> None:
+    with open(LICENSE_FILE, "r", encoding="utf-8") as license_file:
+        _write_text(path, license_file.read())
+
+
 def main() -> None:
     version = load_version()
     audit_generator_inputs()
@@ -570,6 +673,7 @@ def main() -> None:
         os.path.join(OUTPUT_DIR, "python", "meshpack", "__init__.py"),
         "from .models import *\nfrom .extensions import *\n",
     )
+    _write_package_license(os.path.join(OUTPUT_DIR, "python", "LICENSE"))
     render_template(
         "python/README.md.j2",
         context,
@@ -591,6 +695,7 @@ def main() -> None:
         context,
         os.path.join(OUTPUT_DIR, "rust", "meshpack", "README.md"),
     )
+    _write_package_license(os.path.join(OUTPUT_DIR, "rust", "meshpack", "LICENSE"))
 
     render_template(
         "typescript/index.ts.j2",
@@ -617,6 +722,7 @@ def main() -> None:
         context,
         os.path.join(OUTPUT_DIR, "typescript", "README.md"),
     )
+    _write_package_license(os.path.join(OUTPUT_DIR, "typescript", "LICENSE"))
 
     render_template(
         "java/MeshPack.java.j2",
@@ -660,6 +766,7 @@ def main() -> None:
         context,
         os.path.join(OUTPUT_DIR, "java", "meshpack", "README.md"),
     )
+    _write_package_license(os.path.join(OUTPUT_DIR, "java", "meshpack", "LICENSE"))
 
 
 if __name__ == "__main__":

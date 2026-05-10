@@ -260,6 +260,7 @@ cryptography = pytest.importorskip("cryptography", reason="cryptography package 
 
 @pytest.mark.REQ_L3_030
 @pytest.mark.REQ_L3_031
+@pytest.mark.REQ_L3_032
 class TestSignatureVerificationCrypto:
     """Verify that Ed25519 and RSA-PSS-SHA256 signatures are checked."""
 
@@ -332,6 +333,101 @@ class TestSignatureVerificationCrypto:
         }]
 
         findings = verify_signature_entries(signatures, pack_hash)
+        errors = [f for f in findings if f.code == "SIG-004"]
+        assert errors, f"Expected SIG-004 error, got: {findings}"
+
+    def test_ed25519_rejects_malformed_der_with_trailing_key(self) -> None:
+        """Malformed DER must not be accepted by slicing the final 32 bytes."""
+        import base64
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        private_key = Ed25519PrivateKey.generate()
+        public_key = private_key.public_key()
+        pub_bytes = public_key.public_bytes_raw()
+
+        pack_hash = "sha256:" + "ab" * 32
+        sig_bytes = private_key.sign(pack_hash.encode("utf-8"))
+
+        signatures = [{
+            "alg": "ed25519",
+            "public_key": base64.b64encode(b"not-der-prefix" + pub_bytes).decode(),
+            "signature": base64.b64encode(sig_bytes).decode(),
+            "signer_id": "malformed-der",
+        }]
+
+        findings = verify_signature_entries(signatures, pack_hash)
+        assert any(f.code == "SIG-004" for f in findings), findings
+        assert not any(f.code == "SIG-010" for f in findings), findings
+
+    def test_invalid_base64_is_sig003(self) -> None:
+        """Invalid base64 should fail before key or signature parsing."""
+        signatures = [{
+            "alg": "ed25519",
+            "public_key": "!!!!",
+            "signature": "also-not-base64",
+        }]
+
+        findings = verify_signature_entries(signatures, "sha256:" + "00" * 32)
+        errors = [f for f in findings if f.code == "SIG-003"]
+        assert errors, f"Expected SIG-003 error, got: {findings}"
+
+    def test_rsa_pss_valid_signature(self) -> None:
+        """A valid RSA-PSS-SHA256 signature over pack_hash should produce SIG-010."""
+        import base64
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
+        pub_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        pack_hash = "sha256:" + "ab" * 32
+        sig_bytes = private_key.sign(
+            pack_hash.encode("utf-8"),
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256(),
+        )
+
+        signatures = [{
+            "alg": "rsa-pss-sha256",
+            "public_key": base64.b64encode(pub_bytes).decode(),
+            "signature": base64.b64encode(sig_bytes).decode(),
+            "signer_id": "rsa-signer",
+        }]
+
+        findings = verify_signature_entries(signatures, pack_hash)
+        infos = [f for f in findings if f.code == "SIG-010"]
+        assert infos, f"Expected SIG-010 success, got: {findings}"
+
+    def test_rsa_pss_invalid_signature(self) -> None:
+        """A forged RSA-PSS-SHA256 signature should produce SIG-004."""
+        import base64
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
+        pub_bytes = public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        sig_bytes = private_key.sign(
+            b"wrong-data",
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256(),
+        )
+
+        signatures = [{
+            "alg": "rsa-pss-sha256",
+            "public_key": base64.b64encode(pub_bytes).decode(),
+            "signature": base64.b64encode(sig_bytes).decode(),
+        }]
+
+        findings = verify_signature_entries(signatures, "sha256:" + "ab" * 32)
         errors = [f for f in findings if f.code == "SIG-004"]
         assert errors, f"Expected SIG-004 error, got: {findings}"
 

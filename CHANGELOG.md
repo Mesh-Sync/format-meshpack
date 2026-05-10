@@ -12,12 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK metadata templates for Python, Rust, TypeScript, and Java 17 package outputs.
 - Shared SDK validation vectors and requirement coverage enforcement for public conformance claims.
 - Public sample release guards for sidecar archive size and creator email redaction.
+- Public artifact hygiene and clean-worktree release gates for generated SDK package roots and samples.
+- Rust generated SDK RSA-PSS-SHA256 sidecar signature verification parity.
 
 ### Changed
 - Entry ordering and `entries_hash` canonicalization now explicitly use UTF-8 byte path ordering across the reference validator and generated SDK templates.
 - JCS object key canonicalization now uses RFC 8785 UTF-16 code-unit ordering across the reference validator and generated SDK templates.
 - The repository `VERSION` source now accepts only canonical MeshPack archive format versions (`MAJOR.MINOR.PATCH`).
 - The generated TypeScript writer accepts deterministic `extraFiles` and emits default README entries for L2 archive layout compatibility.
+- Signature verification now uses strict base64 and accepts Ed25519 public keys only as raw 32-byte or valid SPKI/DER keys.
 
 ## [2.0.0] - 2026-05-09
 

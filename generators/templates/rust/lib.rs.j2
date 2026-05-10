@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use ed25519_dalek::{Signature as Ed25519Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature as Ed25519Signature, Verifier as Ed25519Verifier, VerifyingKey};
+use rsa::{pkcs8::DecodePublicKey, pss, traits::PublicKeyParts, RsaPublicKey};
+use rsa::signature::Verifier as RsaVerifier;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256, Sha512};
@@ -14,6 +16,7 @@ use zip::{CompressionMethod, ZipArchive};
 
 pub const VERSION: &str = "{{ version }}";
 const SUPPORTED_FORMAT_MAJOR: u64 = {{ format_major }};
+const ED25519_SPKI_PREFIX: &[u8] = &[0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00];
 
 {% macro rust_base(t) -%}
 {%- if t.is_array -%}
@@ -531,18 +534,10 @@ fn verify_signature_entries(signatures: &[SignatureEntry], pack_hash: &str) -> V
         };
 
         if signature_entry.alg == "ed25519" {
-            let key_bytes = if public_key_bytes.len() == 32 {
-                public_key_bytes.as_slice()
-            } else if public_key_bytes.len() > 32 {
-                &public_key_bytes[public_key_bytes.len() - 32..]
-            } else {
-                findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 public key must be 32 bytes")));
-                continue;
-            };
-            let key_array: [u8; 32] = match key_bytes.try_into() {
+            let key_array: [u8; 32] = match ed25519_public_key_bytes(&public_key_bytes) {
                 Ok(bytes) => bytes,
-                Err(_) => {
-                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 public key must be 32 bytes")));
+                Err(error) => {
+                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: {error}")));
                     continue;
                 }
             };
@@ -565,11 +560,45 @@ fn verify_signature_entries(signatures: &[SignatureEntry], pack_hash: &str) -> V
             } else {
                 findings.push(finding("ERROR", "SIG-004", format!("{signer}: Ed25519 signature verification failed")));
             }
+        } else if signature_entry.alg == "rsa-pss-sha256" {
+            let public_key = match RsaPublicKey::from_public_key_der(&public_key_bytes) {
+                Ok(key) => key,
+                Err(error) => {
+                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: RSA-PSS-SHA256 public key failed to load - {error}")));
+                    continue;
+                }
+            };
+                    let salt_len = public_key.n().bits().div_ceil(8).saturating_sub(32 + 2);
+            let verifying_key = pss::VerifyingKey::<Sha256>::new_with_salt_len(public_key, salt_len);
+            let signature = match pss::Signature::try_from(signature_bytes.as_slice()) {
+                Ok(signature) => signature,
+                Err(error) => {
+                    findings.push(finding("ERROR", "SIG-004", format!("{signer}: RSA-PSS-SHA256 signature failed to load - {error}")));
+                    continue;
+                }
+            };
+            if RsaVerifier::verify(&verifying_key, pack_hash.as_bytes(), &signature).is_ok() {
+                findings.push(finding("INFO", "SIG-010", format!("{signer}: RSA-PSS-SHA256 signature verified successfully")));
+            } else {
+                findings.push(finding("ERROR", "SIG-004", format!("{signer}: RSA-PSS-SHA256 signature verification failed")));
+            }
         } else {
             findings.push(finding("INFO", "SIG-005", format!("{signer}: unsupported algorithm '{}' - skipped", signature_entry.alg)));
         }
     }
     findings
+}
+
+fn ed25519_public_key_bytes(public_key_bytes: &[u8]) -> Result<[u8; 32], String> {
+    if public_key_bytes.len() == 32 {
+        return public_key_bytes.try_into().map_err(|_| "Ed25519 public key must be raw 32-byte or SPKI/DER".to_string());
+    }
+    if public_key_bytes.len() == ED25519_SPKI_PREFIX.len() + 32 && public_key_bytes.starts_with(ED25519_SPKI_PREFIX) {
+        return public_key_bytes[ED25519_SPKI_PREFIX.len()..]
+            .try_into()
+            .map_err(|_| "Ed25519 public key must be raw 32-byte or SPKI/DER".to_string());
+    }
+    Err("Ed25519 public key must be raw 32-byte or SPKI/DER".to_string())
 }
 
 fn compute_entries_hash(entries: &[Value], algo: &str) -> Result<String, String> {
@@ -649,6 +678,12 @@ mod tests {
     const JCS_UTF16_VECTOR_ENTRIES_HASH: &str = "{{ vector.entries_hash }}";
 {% endif %}
 {% endfor %}
+{% for vector in sdk_validation_vectors.signature_vectors %}
+{% if vector.id == "invalid-base64-signature" %}
+    const INVALID_SIGNATURE_VECTOR_JSON: &str = r#"{{ vector.signatures_json }}"#;
+    const INVALID_SIGNATURE_EXPECTED_CODE: &str = "{{ vector.expected_error_code }}";
+{% endif %}
+{% endfor %}
 
     fn unique_path(name: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
@@ -694,6 +729,10 @@ mod tests {
     }
 
     fn write_sidecar(path: &Path) -> PathBuf {
+        write_sidecar_with_signatures(path, Value::Array(vec![]))
+    }
+
+    fn write_sidecar_with_signatures(path: &Path, signatures: Value) -> PathBuf {
         let archive_bytes = fs::read(path).expect("read archive");
         let digest = compute_digest_hex(&archive_bytes, "sha256").expect("hash archive");
         let sidecar_path = PathBuf::from(format!("{}.integrity", path.to_string_lossy()));
@@ -703,7 +742,7 @@ mod tests {
             "hash_algo": "sha256",
             "pack_hash": format!("sha256:{digest}"),
             "computed_at": "2026-05-09T00:00:00Z",
-            "signatures": []
+            "signatures": signatures
         });
         fs::write(&sidecar_path, sidecar.to_string()).expect("write sidecar");
         sidecar_path
@@ -722,6 +761,27 @@ mod tests {
 
         assert!(result.is_valid(), "{:?}", result.findings);
         assert!(result.findings.iter().any(|finding| finding.code == "SDC-010"));
+        let _ = fs::remove_file(sidecar);
+        let _ = fs::remove_file(archive);
+    }
+
+    #[test]
+    fn reports_invalid_signature_base64() {
+        let archive = unique_path("invalid-signature-base64");
+        write_archive(&archive, &[
+            ("manifest.json", manifest(0, EMPTY_ENTRIES_HASH)),
+            ("index/part-00001.json", shard(Value::Array(vec![]), EMPTY_ENTRIES_HASH)),
+        ]);
+        let signatures: Value = serde_json::from_str(INVALID_SIGNATURE_VECTOR_JSON).expect("parse signature vector");
+        let sidecar = write_sidecar_with_signatures(&archive, signatures);
+
+        let result = validate_meshpack_with_options(&archive, ValidationOptions {
+            sidecar_path: Some(sidecar.clone()),
+            verify_signatures: true,
+        }).expect("validate archive");
+
+        assert!(!result.is_valid());
+        assert!(result.errors().iter().any(|finding| finding.code == INVALID_SIGNATURE_EXPECTED_CODE));
         let _ = fs::remove_file(sidecar);
         let _ = fs::remove_file(archive);
     }

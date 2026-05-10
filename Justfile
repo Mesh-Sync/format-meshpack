@@ -12,6 +12,8 @@ help:
     @echo "  generate       Generate client libraries (Python, Rust, TypeScript, Java 17) from templates"
     @echo "  check-version  Verify generated package versions match VERSION"
     @echo "  determinism-check  Verify generated SDK output is deterministic"
+    @echo "  artifact-hygiene  Scan generated packages and public samples for exposure risks"
+    @echo "  check-clean    Fail if tracked or untracked non-ignored files changed"
     @echo "  validate       Check schema validity (requires 'check-jsonschema')"
     @echo "  compile        Build packages for all languages"
     @echo "  doc            Generate PDF documentation (requires 'pandoc')"
@@ -19,6 +21,7 @@ help:
     @echo "  test           Run tests (Python, Rust, TypeScript, Java)"
     @echo "  publish        Generate, Validate, Compile, Test, Lint and Upload"
     @echo "  publish-dry-run  Full pipeline without uploading (local verification)"
+    @echo "  public-readiness  Full public exposure gate plus clean worktree check"
     @echo "  all            Run generate, validate, lint, test, and compile"
 
 generate:
@@ -32,6 +35,16 @@ check-version:
 determinism-check:
     @echo "Checking deterministic generation..."
     python3 tools/check_generation_determinism.py
+
+artifact-hygiene:
+    @echo "Checking public artifact hygiene..."
+    python3 tools/check_public_artifacts.py
+
+check-clean:
+    @echo "Checking repository cleanliness..."
+    git diff --quiet
+    git diff --cached --quiet
+    test -z "$(git ls-files --others --exclude-standard)"
 
 generate-fixtures:
     @echo "Generating static test fixtures..."
@@ -64,13 +77,13 @@ compile:
     cd generated/sdks/python && python3 -m build
     @echo "Compiling Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && cargo build --release
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/release-build cargo build --release
     @echo "Compiling TypeScript..."
     command -v npm >/dev/null 2>&1
     cd generated/sdks/typescript && npm install && npm run build
     @echo "Compiling Java 17..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q package
+    cd generated/sdks/java/meshpack && mvn -q clean package
 
 lint:
     @echo "Linting Python..."
@@ -78,7 +91,7 @@ lint:
     # mypy generators/ # Enable when typed
     @echo "Linting Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && cargo clippy --all-targets
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/clippy cargo clippy --all-targets
     @echo "Linting TypeScript..."
     command -v npm >/dev/null 2>&1
     cd generated/sdks/typescript && npm install && npm run lint
@@ -91,7 +104,7 @@ test:
     pytest tests/ -v --tb=short
     @echo "Testing Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && cargo test
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/test cargo test
     @echo "Testing TypeScript..."
     command -v npm >/dev/null 2>&1
     cd generated/sdks/typescript && npm install && npm test
@@ -109,7 +122,7 @@ publish: generate check-version validate lint test compile
     # TypeScript
     # npm publish
 
-publish-dry-run: generate check-version determinism-check validate lint test compile
+publish-dry-run: generate check-version determinism-check validate lint test compile artifact-hygiene
     @echo "Dry-run: packing artifacts (no upload)..."
     @echo "--- Python ---"
     cd generated/sdks/python && python3 -m build
@@ -120,10 +133,12 @@ publish-dry-run: generate check-version determinism-check validate lint test com
     @echo "--- Rust ---"
     cd generated/sdks/rust/meshpack && cargo package --list
     @echo "--- Java ---"
-    cd generated/sdks/java/meshpack && mvn -q package
+    cd generated/sdks/java/meshpack && mvn -q clean package
     @echo "Dry-run complete. Review output above before tagging a release."
 
 all: generate check-version determinism-check validate lint test compile
+
+public-readiness: publish-dry-run check-clean
 
 clean:
     rm -rf generated/
