@@ -110,7 +110,7 @@ jobs:
           path: .
           format: cyclonedx-json
           output-file: meshpack-sbom.cdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: meshpack-sbom
           path: meshpack-sbom.cdx.json
