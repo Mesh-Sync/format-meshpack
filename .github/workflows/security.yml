@@ -114,7 +114,7 @@ jobs:
         with:
           name: meshpack-sbom
           path: meshpack-sbom.cdx.json
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             generated/sdks/python/dist/*
