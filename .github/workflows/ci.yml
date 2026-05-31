@@ -35,7 +35,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
 
       - name: Install Just
         uses: extractions/setup-just@v2
@@ -80,7 +79,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
 
       - name: Install Just
         uses: extractions/setup-just@v2
