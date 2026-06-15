@@ -5,6 +5,7 @@ referencing
 build
 twine
 pytest
+pydantic>=1.10.0
 mypy
 types-python-dateutil
 black
