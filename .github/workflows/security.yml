@@ -18,7 +18,7 @@ jobs:
   codeql:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -35,8 +35,9 @@ jobs:
 
   dependency-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -48,12 +49,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
-          path: ~/.m2/repository/org/owasp/dependency-check-data
-          key: dependency-check-data-${{ runner.os }}-${{ github.run_id }}
+          path: ~/.m2/repository
+          key: meshpack-maven-${{ runner.os }}-${{ hashFiles('generators/templates/java/pom.xml.j2') }}
           restore-keys: |
-            dependency-check-data-${{ runner.os }}-
+            meshpack-maven-${{ runner.os }}-
       - uses: extractions/setup-just@v2
       - name: Install Python dependencies
         run: |
@@ -78,16 +79,25 @@ jobs:
           cd generated/sdks/rust/meshpack
           # RUSTSEC-2023-0071 has no fixed release; this SDK uses rsa only for public-key signature verification.
           cargo audit --ignore RUSTSEC-2023-0071
-      - name: Maven dependency check
+      - name: Generate Maven dependency SBOM
         run: |
           cd generated/sdks/java/meshpack
-          # NVD regularly rate-limits anonymous GitHub-hosted runners; keep the CVSS gate when data is available.
-          mvn -q org.owasp:dependency-check-maven:12.2.2:check -DfailBuildOnCVSS=8 -DfailOnError=false
+          mvn -q org.cyclonedx:cyclonedx-maven-plugin:2.9.2:makeBom -DskipTests
+      - name: Maven dependency vulnerability gate
+        uses: anchore/scan-action@v7
+        with:
+          sbom: generated/sdks/java/meshpack/target/bom.json
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: false
+          by-cve: true
+          cache-db: true
+          output-format: table
 
   secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Run gitleaks
@@ -102,7 +112,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
