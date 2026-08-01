@@ -28,10 +28,10 @@ jobs:
           pip install -r requirements.txt
       - name: Generate SDK sources for analysis
         run: python generators/generate_sdks.py
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4.37.3
         with:
           languages: javascript-typescript, python
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4.37.3
 
   dependency-audit:
     runs-on: ubuntu-latest
