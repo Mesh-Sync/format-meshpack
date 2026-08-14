@@ -448,6 +448,21 @@ class TestGenerationReleaseReadiness:
         assert "RsaPublicKey::from_public_key_der" in contents
         assert "pss::VerifyingKey::<Sha256>" in contents
 
+    def test_java_template_uses_patched_security_dependencies(self):
+        with open(
+            os.path.join(REPO_ROOT, "generators", "templates", "java", "pom.xml.j2"),
+            "r",
+            encoding="utf-8",
+        ) as template:
+            contents = template.read()
+
+        assert "<jackson.version>2.18.9</jackson.version>" in contents
+        assert contents.count("<version>${jackson.version}</version>") == 2
+        assert "<bouncycastle.version>1.84</bouncycastle.version>" in contents
+        assert "<version>${bouncycastle.version}</version>" in contents
+        assert "2.17.2" not in contents
+        assert "<version>1.79</version>" not in contents
+
     @pytest.mark.parametrize(
         ("template_path", "markers"),
         [
