@@ -143,3 +143,9 @@ public-readiness: publish-dry-run check-clean
 clean:
     rm -rf generated/
 
+# Workspace quality contract. Profiles are monotonic and have no external side effects.
+quality-fast: validate test lint
+
+quality-full: quality-fast determinism-check artifact-hygiene check-version
+
+quality-release: quality-full
