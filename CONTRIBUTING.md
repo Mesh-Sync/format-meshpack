@@ -55,10 +55,22 @@ Contributions to the format specification (in `definition/README.md`) should:
 - **Java 17+ and Maven 3.9+** (for Java SDK)
 - **Just** command runner ([installation guide](https://github.com/casey/just))
 
-Install Python dependencies:
+Bootstrap the SDK tree and dependencies explicitly:
 ```bash
-pip install -r requirements.txt
+just provision
 ```
+
+This clean-checkout workflow installs Python tooling first, generates the SDK
+tree with byte-identical copies of the tracked Cargo and npm locks, then
+populates the Rust, TypeScript, and Java dependency caches.
+
+The quality profiles never invoke this network-capable step. After
+provisioning, `just quality-fast` runs against local dependencies only; Cargo
+is locked and offline, npm is offline, and Maven is offline.
+
+`generators/locks/` is the authoritative lock source. Do not hand-edit locks
+under the ignored `generated/` tree; `just check-locks` rejects missing or
+drifted generated copies.
 
 ### The Schema-Driven Architecture
 

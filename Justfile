@@ -11,11 +11,13 @@ help:
     @echo "Available commands:"
     @echo "  generate       Generate client libraries (Python, Rust, TypeScript, Java 17) from templates"
     @echo "  check-version  Verify generated package versions match VERSION"
+    @echo "  check-locks    Verify generated locks match tracked authoritative inputs"
     @echo "  determinism-check  Verify generated SDK output is deterministic"
     @echo "  artifact-hygiene  Scan generated packages and public samples for exposure risks"
     @echo "  check-clean    Fail if tracked or untracked non-ignored files changed"
     @echo "  validate       Check schema validity (requires 'check-jsonschema')"
     @echo "  compile        Build packages for all languages"
+    @echo "  provision      Bootstrap generated SDKs and local dependencies (networked, outside quality profiles)"
     @echo "  doc            Generate PDF documentation (requires 'pandoc')"
     @echo "  lint           Run code linters (Python, Rust, TypeScript, Java)"
     @echo "  test           Run tests (Python, Rust, TypeScript, Java)"
@@ -31,6 +33,10 @@ generate:
 check-version:
     @echo "Checking generated SDK versions..."
     python3 tools/check_generated_versions.py
+
+check-locks:
+    @echo "Checking generated SDK locks..."
+    python3 tools/check_generated_locks.py
 
 determinism-check:
     @echo "Checking deterministic generation..."
@@ -57,7 +63,7 @@ doc:
 
 validate:
     @echo "Validating schemas..."
-    # Ensure check-jsonschema is installed: pip install check-jsonschema
+    # Requires the pre-provisioned check-jsonschema executable.
     check-jsonschema --check-metaschema schema/manifest.schema.json
     check-jsonschema --check-metaschema schema/shard.schema.json
     check-jsonschema --check-metaschema schema/sidecar.schema.json
@@ -71,19 +77,33 @@ validate:
     @echo "Validating public sample archive..."
     python3 tools/meshpack_validate.py --strict samples/test-workspace.mpack
 
+# Explicit, network-capable dependency provisioning. Quality profiles never
+# depend on this recipe; they consume only already-installed tools and caches.
+provision:
+    @echo "Provisioning Python dependencies..."
+    python3 -m pip install --requirement requirements.txt
+    @echo "Generating SDK manifests and authoritative lock copies..."
+    python3 generators/generate_sdks.py
+    @echo "Provisioning Rust dependencies..."
+    cd generated/sdks/rust/meshpack && cargo fetch --locked
+    @echo "Provisioning TypeScript dependencies..."
+    cd generated/sdks/typescript && npm ci
+    @echo "Provisioning Java 17 dependencies..."
+    cd generated/sdks/java/meshpack && mvn -q dependency:go-offline
+
 compile:
     @echo "Compiling Python..."
     # Ensure build is installed: pip install build
     cd generated/sdks/python && python3 -m build
     @echo "Compiling Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/release-build cargo build --release
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/release-build cargo build --release --locked --offline
     @echo "Compiling TypeScript..."
     command -v npm >/dev/null 2>&1
-    cd generated/sdks/typescript && npm install && npm run build
+    cd generated/sdks/typescript && npm --offline run build
     @echo "Compiling Java 17..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q clean package
+    cd generated/sdks/java/meshpack && mvn --offline -q clean package
 
 lint:
     @echo "Linting Python..."
@@ -91,26 +111,26 @@ lint:
     # mypy generators/ # Enable when typed
     @echo "Linting Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/clippy cargo clippy --all-targets
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/clippy cargo clippy --all-targets --locked --offline
     @echo "Linting TypeScript..."
     command -v npm >/dev/null 2>&1
-    cd generated/sdks/typescript && npm install && npm run lint
+    cd generated/sdks/typescript && npm --offline run lint
     @echo "Checking Java 17 compile..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q -DskipTests compile
+    cd generated/sdks/java/meshpack && mvn --offline -q -DskipTests compile
 
 test:
     @echo "Running Python tests..."
     pytest tests/ -v --tb=short
     @echo "Testing Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/test cargo test
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/test cargo test --locked --offline
     @echo "Testing TypeScript..."
     command -v npm >/dev/null 2>&1
-    cd generated/sdks/typescript && npm install && npm test
+    cd generated/sdks/typescript && npm --offline test
     @echo "Testing Java 17..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q test
+    cd generated/sdks/java/meshpack && mvn --offline -q test
 
 publish: generate check-version validate lint test compile
     @echo "Publishing..."
@@ -128,12 +148,12 @@ publish-dry-run: generate check-version determinism-check validate lint test com
     cd generated/sdks/python && python3 -m build
     @echo "--- TypeScript ---"
     if command -v npm >/dev/null 2>&1; then \
-        cd generated/sdks/typescript && npm pack --dry-run; \
+        cd generated/sdks/typescript && npm --offline pack --dry-run; \
     fi
     @echo "--- Rust ---"
-    cd generated/sdks/rust/meshpack && cargo package --list
+    cd generated/sdks/rust/meshpack && cargo package --list --locked --offline
     @echo "--- Java ---"
-    cd generated/sdks/java/meshpack && mvn -q clean package
+    cd generated/sdks/java/meshpack && mvn --offline -q clean package
     @echo "Dry-run complete. Review output above before tagging a release."
 
 all: generate check-version determinism-check validate lint test compile
@@ -143,8 +163,9 @@ public-readiness: publish-dry-run check-clean
 clean:
     rm -rf generated/
 
-# Workspace quality contract. Profiles are monotonic and have no external side effects.
-quality-fast: validate test lint
+# Workspace quality contract. Profiles are monotonic, consume pre-provisioned
+# local dependencies only, and have no external side effects.
+quality-fast: check-locks validate test lint
 
 quality-full: quality-fast determinism-check artifact-hygiene check-version
 
