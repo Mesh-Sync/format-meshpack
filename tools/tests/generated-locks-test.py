@@ -33,6 +33,23 @@ def main() -> None:
         if ignored.returncode not in (0, 1):
             fail(f"git check-ignore failed for {source}")
 
+    install_deps = subprocess.run(
+        ["just", "--dry-run", "install-deps"],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ).stdout
+    root_dependency_steps = (
+        "python3 -m venv .venv",
+        ".venv/bin/python -m pip install --requirement requirements.txt",
+    )
+    if any(step not in install_deps for step in root_dependency_steps):
+        fail("install-deps does not create and use the repository-local venv")
+    if "generators/generate_sdks.py" in install_deps:
+        fail("install-deps must not generate SDKs")
+
     provision = subprocess.run(
         ["just", "--dry-run", "provision"],
         cwd=REPO_ROOT,
@@ -42,8 +59,8 @@ def main() -> None:
         stderr=subprocess.STDOUT,
     ).stdout
     bootstrap_steps = (
-        "python3 -m pip install --requirement requirements.txt",
-        "python3 generators/generate_sdks.py",
+        *root_dependency_steps,
+        ".venv/bin/python generators/generate_sdks.py",
         "cargo fetch --locked",
         "npm ci",
         "mvn -q dependency:go-offline",
@@ -52,7 +69,7 @@ def main() -> None:
     if any(position < 0 for position in positions):
         fail("provision dry-run is missing a clean-checkout bootstrap step")
     if positions != sorted(positions):
-        fail("provision does not install Python, generate locks, then provision SDKs in order")
+        fail("provision does not install root tools, generate locks, then provision SDKs in order")
 
     with tempfile.TemporaryDirectory(prefix="meshpack-lock-test-") as temp_dir:
         clean_output = Path(temp_dir) / "generated" / "sdks"
