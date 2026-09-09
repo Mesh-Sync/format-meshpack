@@ -2,10 +2,15 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-dry_run="$(cd "$repo_root" && just --dry-run quality-fast 2>&1)"
+profile="${1:-quality-fast}"
+case "$profile" in
+    quality-fast|quality-full|quality-release) ;;
+    *) printf 'Unsupported quality profile: %s\n' "$profile" >&2; exit 1 ;;
+esac
+dry_run="$(cd "$repo_root" && just --dry-run "$profile" 2>&1)"
 
 fail() {
-    printf 'quality-fast offline contract failed: %s\n' "$1" >&2
+    printf 'quality profile offline contract failed: %s\n' "$1" >&2
     exit 1
 }
 
@@ -26,4 +31,15 @@ grep -Fq 'python3 tools/check_generated_locks.py' <<<"$dry_run" || fail "generat
 pom="$repo_root/generated/sdks/java/meshpack/pom.xml"
 grep -Fq '<maven.compiler.release>17</maven.compiler.release>' "$pom" || fail "Java 17 compiler release is not preserved"
 
-printf 'quality-fast is offline, non-provisioning, locked, and covers Python, Rust, TypeScript, and Java 17\n'
+if [[ "$profile" == quality-release ]]; then
+    grep -Fq ' -m build --no-isolation' <<<"$dry_run" || fail "Python packaging is not using provisioned build tools"
+    grep -Fq 'cargo build --release --locked --offline' <<<"$dry_run" || fail "Rust packaging is not locked and offline"
+    grep -Fq 'npm --offline pack --dry-run' <<<"$dry_run" || fail "npm packaging is not offline"
+    grep -Fq 'mvn --offline -q package' <<<"$dry_run" || fail "Java packaging is not offline"
+    grep -Fq 'cargo package --list --locked --offline' <<<"$dry_run" || fail "Cargo package inspection is not offline"
+    if grep -Eq '(twine upload|npm publish|cargo publish| -m build$)' <<<"$dry_run"; then
+        fail "release validation can publish or provision an isolated build environment"
+    fi
+fi
+
+printf 'quality profile is offline, non-provisioning, locked, and covers Python, Rust, TypeScript, and Java 17\n'
