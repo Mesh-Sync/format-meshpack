@@ -13,25 +13,28 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.11'
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          components: clippy
 
       - name: Set up Java 17
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
         with:
           distribution: temurin
           java-version: '17'
@@ -39,18 +42,17 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6
 
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Provision tooling and SDK dependencies
+        run: just provision
 
       - name: Public Readiness Gate
         run: just public-readiness
 
   publish:
     needs: build-and-test
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
@@ -60,22 +62,27 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
+      - name: Verify Release Tag Version
+        run: test "$(cat VERSION)" = "${GITHUB_REF_NAME#v}"
+
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.11'
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: https://registry.npmjs.org
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          components: clippy
 
       - name: Set up Java 17
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
         with:
           distribution: temurin
           java-version: '17'
@@ -83,10 +90,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6
 
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Provision tooling and SDK dependencies
+        run: just provision
 
       - name: Build Release Artifacts
         run: just publish-dry-run
@@ -95,47 +100,12 @@ jobs:
         run: just check-clean
 
       - name: Create Attestable Package Artifacts
-        run: |
-          cd generated/sdks/typescript
-          npm pack
-          cd ../rust/meshpack
-          cargo package --allow-dirty
-
-      - name: Verify Release Tag Version
-        run: |
-          test "$(cat VERSION)" = "${GITHUB_REF_NAME#v}"
-          python tools/check_generated_versions.py
-
-      - name: Publish Python
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: |
-          cd generated/sdks/python
-          twine upload dist/*
-
-      - name: Publish NPM
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          cd generated/sdks/typescript
-          npm publish --access public
-
-      - name: Publish Cargo
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          cd generated/sdks/rust/meshpack
-          cargo publish
-
-      - name: Package Java
-        run: |
-          cd generated/sdks/java/meshpack
-          mvn -q clean package
+        run: just package-artifacts
 
       - name: Upload Release Artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
+          if-no-files-found: error
           name: meshpack-release-artifacts-${{ github.ref_name }}
           path: |
             generated/sdks/python/dist/*
@@ -144,7 +114,7 @@ jobs:
             generated/sdks/java/meshpack/target/*.jar
 
       - name: Attest Release Artifacts
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-path: |
             generated/sdks/python/dist/*
@@ -152,11 +122,35 @@ jobs:
             generated/sdks/rust/meshpack/target/package/*.crate
             generated/sdks/java/meshpack/target/*.jar
 
+      - name: Publish Python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          cd generated/sdks/python
+          "$GITHUB_WORKSPACE/.venv/bin/python" -m twine upload dist/*
+
+      - name: Publish NPM
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd generated/sdks/typescript
+          npm publish ./*.tgz --access public
+
+      - name: Publish Cargo
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          cd generated/sdks/rust/meshpack
+          cargo publish --locked
+
       - name: Verify Published Packages
         run: |
           PKG_VERSION="${GITHUB_REF_NAME#v}"
           npm view @mesh-sync/meshpack@"$PKG_VERSION" version
-          pip index versions meshpack 2>/dev/null | grep -q "$PKG_VERSION" \
-            || echo "Warning: PyPI verification requires pip 21.2+; check manually."
-          curl -sf "https://crates.io/api/v1/crates/meshpack/$PKG_VERSION" \
-            | python3 -c "import sys,json; v=json.load(sys.stdin)['version']['num']; print(f'crates.io: {v}')"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 10 \
+            "https://pypi.org/pypi/meshpack/$PKG_VERSION/json" \
+            | python3 -c 'import json,sys; assert json.load(sys.stdin)["info"]["version"] == sys.argv[1]' "$PKG_VERSION"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 10 \
+            "https://crates.io/api/v1/crates/meshpack/$PKG_VERSION" \
+            | python3 -c 'import json,sys; assert json.load(sys.stdin)["version"]["num"] == sys.argv[1]' "$PKG_VERSION"

@@ -26,6 +26,7 @@ help:
     @echo "  test           Run tests (Python, Rust, TypeScript, Java)"
     @echo "  publish        Generate, Validate, Compile, Test, Lint and Upload"
     @echo "  publish-dry-run  Full pipeline without uploading (local verification)"
+    @echo "  package-artifacts  Create npm/Cargo archives after a successful dry run (no upload)"
     @echo "  public-readiness  Full public exposure gate plus clean worktree check"
     @echo "  all            Run generate, validate, lint, test, and compile"
 
@@ -101,10 +102,13 @@ provision: install-deps
     cd generated/sdks/typescript && npm ci
     @echo "Provisioning Java 17 dependencies..."
     cd generated/sdks/java/meshpack && mvn -q dependency:go-offline
+    # Surefire discovers its provider at runtime; execute the lifecycle once to
+    # cache provider and packaging dependencies before offline quality checks.
+    cd generated/sdks/java/meshpack && mvn -q clean package
 
 compile:
     @echo "Compiling Python..."
-    cd generated/sdks/python && {{venv_python}} -m build
+    cd generated/sdks/python && {{venv_python}} -m build --no-isolation
     @echo "Compiling Rust..."
     command -v cargo >/dev/null 2>&1
     cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/release-build cargo build --release --locked --offline
@@ -113,7 +117,7 @@ compile:
     cd generated/sdks/typescript && npm --offline run build
     @echo "Compiling Java 17..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn --offline -q clean package
+    cd generated/sdks/java/meshpack && mvn --offline -q package
 
 lint:
     @echo "Linting Python..."
@@ -152,19 +156,20 @@ publish: generate check-version validate lint test compile
     # TypeScript
     # npm publish
 
-publish-dry-run: generate check-version determinism-check validate lint test compile artifact-hygiene
-    @echo "Dry-run: packing artifacts (no upload)..."
-    @echo "--- Python ---"
-    cd generated/sdks/python && {{venv_python}} -m build
-    @echo "--- TypeScript ---"
-    if command -v npm >/dev/null 2>&1; then \
-        cd generated/sdks/typescript && npm --offline pack --dry-run; \
-    fi
-    @echo "--- Rust ---"
+# Validate and build once, then inspect packages without uploading.
+publish-dry-run: quality-release
+    @echo "Dry-run complete. No packages uploaded."
+
+# Materialize the npm/Cargo archives after publish-dry-run. Python and Java
+# archives are already built by compile; this recipe never publishes.
+package-artifacts:
+    cd generated/sdks/typescript && npm --offline pack
+    cd generated/sdks/rust/meshpack && cargo package --allow-dirty --locked --offline
+
+package-check:
+    {{venv_python}} -m twine check generated/sdks/python/dist/*
+    cd generated/sdks/typescript && npm --offline pack --dry-run
     cd generated/sdks/rust/meshpack && cargo package --list --locked --offline
-    @echo "--- Java ---"
-    cd generated/sdks/java/meshpack && mvn --offline -q clean package
-    @echo "Dry-run complete. Review output above before tagging a release."
 
 all: generate check-version determinism-check validate lint test compile
 
@@ -176,7 +181,10 @@ clean:
 # Workspace quality contract. Profiles are monotonic, consume pre-provisioned
 # local dependencies only, and have no external side effects.
 quality-fast: check-locks validate test lint
+    bash tools/tests/quality-fast-offline-test.sh
+    {{venv_python}} tools/tests/generated-locks-test.py
 
 quality-full: quality-fast determinism-check artifact-hygiene check-version
 
-quality-release: quality-full
+quality-release: quality-full compile package-check
+    bash tools/tests/quality-fast-offline-test.sh quality-release

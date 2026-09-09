@@ -46,7 +46,7 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 ### Prerequisites
 - **Python 3.10+** (for generators)
 - **Node.js/npm** (for TypeScript SDK build)
-- **Rust/Cargo** (for Rust SDK build)
+- **Rust/Cargo with Clippy** (for Rust SDK build and lint)
 - **JDK 17 + Maven** (for Java SDK build)
 - **Just** (`curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to ~/bin`)
 
@@ -66,6 +66,9 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 | `just lint` | Runs generator lint plus generated Rust, TypeScript, and Java compile checks. |
 | `just test` | Runs Python tests and generated Rust, TypeScript, and Java test/build gates. |
 | `just quality-fast` | Validates and checks all four SDK languages using only pre-provisioned local dependencies and offline/locked package-manager modes. |
+| `just quality-full` | Adds deterministic generation, artifact hygiene, and package version checks. |
+| `just quality-release` | Adds offline compilation and package inspection to the full profile; never uploads packages. |
+| `just package-artifacts` | After `just publish-dry-run`, materializes npm and Cargo archives alongside the built Python and Java packages without publishing. |
 | `just all` | Runs generate, validate, lint, test, and compile. |
 | `just public-readiness` | Runs the full dry-run gate, artifact hygiene, and clean-worktree checks for public exposure. |
 | `just clean` | Removes the `generated/` directory. |

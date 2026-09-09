@@ -3,9 +3,11 @@ check-jsonschema
 jsonschema
 referencing
 build
+setuptools>=77
+wheel
 twine
 pytest
-pydantic>=2.13.4
+pydantic>=2.13.5
 mypy
 types-python-dateutil
 black
