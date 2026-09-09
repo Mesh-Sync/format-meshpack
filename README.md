@@ -62,7 +62,7 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 | `just artifact-hygiene` | Scans public samples and generated package roots for secrets, private-key files, missing package metadata, and public sample privacy issues. |
 | `just check-clean` | Fails when tracked or non-ignored untracked files changed during generation or release checks. |
 | `just validate` | Validates all JSON schemas against the meta-schema and strict-validates the public sample archive. |
-| `just compile` | Builds the generated SDKs (Python wheel, Rust crate, NPM package, Maven package). |
+| `just build` | Builds the generated SDKs (Python wheel, Rust crate, NPM package, Maven package). |
 | `just lint` | Runs generator lint plus generated Rust, TypeScript, and Java compile checks. |
 | `just test` | Runs Python tests and generated Rust, TypeScript, and Java test/build gates. |
 | `just quality-fast` | Validates and checks all four SDK languages using only pre-provisioned local dependencies and offline/locked package-manager modes. |

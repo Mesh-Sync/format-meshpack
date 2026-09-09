@@ -1,3 +1,6 @@
+default:
+    @just --list
+
 # Justfile for standard-meshpack
 
 # Environment variables for publishing (Optional)
@@ -6,29 +9,6 @@
 # NEXUS_PASS := env_var("NEXUS_PASS")
 
 venv_python := justfile_directory() / ".venv" / "bin" / "python"
-
-default: help
-
-help:
-    @echo "Available commands:"
-    @echo "  generate       Generate client libraries (Python, Rust, TypeScript, Java 17) from templates"
-    @echo "  check-version  Verify generated package versions match VERSION"
-    @echo "  check-locks    Verify generated locks match tracked authoritative inputs"
-    @echo "  determinism-check  Verify generated SDK output is deterministic"
-    @echo "  artifact-hygiene  Scan generated packages and public samples for exposure risks"
-    @echo "  check-clean    Fail if tracked or untracked non-ignored files changed"
-    @echo "  validate       Check schema validity (requires 'check-jsonschema')"
-    @echo "  compile        Build packages for all languages"
-    @echo "  install-deps   Install repository-root development/tool dependencies (networked)"
-    @echo "  provision      Bootstrap generated SDKs and local dependencies (networked, outside quality profiles)"
-    @echo "  doc            Generate PDF documentation (requires 'pandoc')"
-    @echo "  lint           Run code linters (Python, Rust, TypeScript, Java)"
-    @echo "  test           Run tests (Python, Rust, TypeScript, Java)"
-    @echo "  publish        Generate, Validate, Compile, Test, Lint and Upload"
-    @echo "  publish-dry-run  Full pipeline without uploading (local verification)"
-    @echo "  package-artifacts  Create npm/Cargo archives after a successful dry run (no upload)"
-    @echo "  public-readiness  Full public exposure gate plus clean worktree check"
-    @echo "  all            Run generate, validate, lint, test, and compile"
 
 generate:
     @echo "Generating SDKs..."
@@ -106,7 +86,7 @@ provision: install-deps
     # cache provider and packaging dependencies before offline quality checks.
     cd generated/sdks/java/meshpack && mvn -q clean package
 
-compile:
+build:
     @echo "Compiling Python..."
     cd generated/sdks/python && {{venv_python}} -m build --no-isolation
     @echo "Compiling Rust..."
@@ -146,7 +126,7 @@ test:
     command -v mvn >/dev/null 2>&1
     cd generated/sdks/java/meshpack && mvn --offline -q test
 
-publish: generate check-version validate lint test compile
+publish: generate check-version validate lint test build
     @echo "Publishing..."
     @echo "Please configure your registry credentials to publish."
     # Python
@@ -161,7 +141,7 @@ publish-dry-run: quality-release
     @echo "Dry-run complete. No packages uploaded."
 
 # Materialize the npm/Cargo archives after publish-dry-run. Python and Java
-# archives are already built by compile; this recipe never publishes.
+# archives are already built by build; this recipe never publishes.
 package-artifacts:
     cd generated/sdks/typescript && npm --offline pack
     cd generated/sdks/rust/meshpack && cargo package --allow-dirty --locked --offline
@@ -171,12 +151,9 @@ package-check:
     cd generated/sdks/typescript && npm --offline pack --dry-run
     cd generated/sdks/rust/meshpack && cargo package --list --locked --offline
 
-all: generate check-version determinism-check validate lint test compile
+all: generate check-version determinism-check validate lint test build
 
 public-readiness: publish-dry-run check-clean
-
-clean:
-    rm -rf generated/
 
 # Workspace quality contract. Profiles are monotonic, consume pre-provisioned
 # local dependencies only, and have no external side effects.
@@ -186,5 +163,12 @@ quality-fast: check-locks validate test lint
 
 quality-full: quality-fast determinism-check artifact-hygiene check-version
 
-quality-release: quality-full compile package-check
+quality-release: quality-full build package-check
     bash tools/tests/quality-fast-offline-test.sh quality-release
+
+# Standard workspace operations; implementations remain repository-owned.
+check: quality-fast
+
+clean:
+    git clean -ndX -- generated/sdks/python/dist/ generated/sdks/rust/meshpack/target/ generated/sdks/typescript/dist/ generated/sdks/java/meshpack/target/
+    git clean -fdX -- generated/sdks/python/dist/ generated/sdks/rust/meshpack/target/ generated/sdks/typescript/dist/ generated/sdks/java/meshpack/target/

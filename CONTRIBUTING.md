@@ -128,7 +128,7 @@ just generate
 
 Build the generated SDKs:
 ```bash
-just compile
+just build
 ```
 
 This will:
