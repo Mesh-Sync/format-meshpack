@@ -5,17 +5,22 @@
 # NEXUS_USER := env_var("NEXUS_USER")
 # NEXUS_PASS := env_var("NEXUS_PASS")
 
+venv_python := justfile_directory() / ".venv" / "bin" / "python"
+
 default: help
 
 help:
     @echo "Available commands:"
     @echo "  generate       Generate client libraries (Python, Rust, TypeScript, Java 17) from templates"
     @echo "  check-version  Verify generated package versions match VERSION"
+    @echo "  check-locks    Verify generated locks match tracked authoritative inputs"
     @echo "  determinism-check  Verify generated SDK output is deterministic"
     @echo "  artifact-hygiene  Scan generated packages and public samples for exposure risks"
     @echo "  check-clean    Fail if tracked or untracked non-ignored files changed"
     @echo "  validate       Check schema validity (requires 'check-jsonschema')"
     @echo "  compile        Build packages for all languages"
+    @echo "  install-deps   Install repository-root development/tool dependencies (networked)"
+    @echo "  provision      Bootstrap generated SDKs and local dependencies (networked, outside quality profiles)"
     @echo "  doc            Generate PDF documentation (requires 'pandoc')"
     @echo "  lint           Run code linters (Python, Rust, TypeScript, Java)"
     @echo "  test           Run tests (Python, Rust, TypeScript, Java)"
@@ -26,15 +31,19 @@ help:
 
 generate:
     @echo "Generating SDKs..."
-    python3 generators/generate_sdks.py
+    {{venv_python}} generators/generate_sdks.py
 
 check-version:
     @echo "Checking generated SDK versions..."
     python3 tools/check_generated_versions.py
 
+check-locks:
+    @echo "Checking generated SDK locks..."
+    python3 tools/check_generated_locks.py
+
 determinism-check:
     @echo "Checking deterministic generation..."
-    python3 tools/check_generation_determinism.py
+    {{venv_python}} tools/check_generation_determinism.py
 
 artifact-hygiene:
     @echo "Checking public artifact hygiene..."
@@ -57,60 +66,81 @@ doc:
 
 validate:
     @echo "Validating schemas..."
-    # Ensure check-jsonschema is installed: pip install check-jsonschema
-    check-jsonschema --check-metaschema schema/manifest.schema.json
-    check-jsonschema --check-metaschema schema/shard.schema.json
-    check-jsonschema --check-metaschema schema/sidecar.schema.json
-    check-jsonschema --check-metaschema schema/common.schema.json
+    # Requires the pre-provisioned repository-local Python environment.
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/manifest.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/shard.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/sidecar.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/common.schema.json
     @echo "Validating extension schemas..."
-    check-jsonschema --check-metaschema schema/extensions/meshsync_geometry.schema.json
-    check-jsonschema --check-metaschema schema/extensions/meshsync_content.schema.json
-    check-jsonschema --check-metaschema schema/extensions/meshsync_thumbnails.schema.json
-    check-jsonschema --check-metaschema schema/extensions/meshsync_printability.schema.json
-    check-jsonschema --check-metaschema schema/extensions/meshsync_dependencies.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/extensions/meshsync_geometry.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/extensions/meshsync_content.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/extensions/meshsync_thumbnails.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/extensions/meshsync_printability.schema.json
+    {{venv_python}} -m check_jsonschema --check-metaschema schema/extensions/meshsync_dependencies.schema.json
     @echo "Validating public sample archive..."
-    python3 tools/meshpack_validate.py --strict samples/test-workspace.mpack
+    {{venv_python}} tools/meshpack_validate.py --strict samples/test-workspace.mpack
+
+# Explicit, network-capable root tooling provisioning. Python dependencies in
+# requirements.txt are the only repository-owned development/tool dependencies;
+# Rust, npm, and Maven dependencies belong to generated SDKs.
+# Install only the repository-root development/tool dependency manifest.
+install-deps:
+    @echo "Installing repository Python development/tool dependencies..."
+    python3 -m venv .venv
+    {{venv_python}} -m pip install --requirement requirements.txt
+
+# Bootstrap generated SDKs and their dependencies. Quality profiles never
+# depend on this recipe; they consume only already-installed tools and caches.
+# Generate SDKs before provisioning their language-specific dependencies.
+provision: install-deps
+    @echo "Generating SDK manifests and authoritative lock copies..."
+    {{venv_python}} generators/generate_sdks.py
+    @echo "Provisioning Rust dependencies..."
+    cd generated/sdks/rust/meshpack && cargo fetch --locked
+    @echo "Provisioning TypeScript dependencies..."
+    cd generated/sdks/typescript && npm ci
+    @echo "Provisioning Java 17 dependencies..."
+    cd generated/sdks/java/meshpack && mvn -q dependency:go-offline
 
 compile:
     @echo "Compiling Python..."
-    # Ensure build is installed: pip install build
-    cd generated/sdks/python && python3 -m build
+    cd generated/sdks/python && {{venv_python}} -m build
     @echo "Compiling Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/release-build cargo build --release
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/release-build cargo build --release --locked --offline
     @echo "Compiling TypeScript..."
     command -v npm >/dev/null 2>&1
-    cd generated/sdks/typescript && npm install && npm run build
+    cd generated/sdks/typescript && npm --offline run build
     @echo "Compiling Java 17..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q clean package
+    cd generated/sdks/java/meshpack && mvn --offline -q clean package
 
 lint:
     @echo "Linting Python..."
-    flake8 generators/
+    {{venv_python}} -m flake8 generators/
     # mypy generators/ # Enable when typed
     @echo "Linting Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/clippy cargo clippy --all-targets
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/clippy cargo clippy --all-targets --locked --offline
     @echo "Linting TypeScript..."
     command -v npm >/dev/null 2>&1
-    cd generated/sdks/typescript && npm install && npm run lint
+    cd generated/sdks/typescript && npm --offline run lint
     @echo "Checking Java 17 compile..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q -DskipTests compile
+    cd generated/sdks/java/meshpack && mvn --offline -q -DskipTests compile
 
 test:
     @echo "Running Python tests..."
-    pytest tests/ -v --tb=short
+    {{venv_python}} -m pytest tests/ -v --tb=short
     @echo "Testing Rust..."
     command -v cargo >/dev/null 2>&1
-    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/test cargo test
+    cd generated/sdks/rust/meshpack && CARGO_TARGET_DIR=target/test cargo test --locked --offline
     @echo "Testing TypeScript..."
     command -v npm >/dev/null 2>&1
-    cd generated/sdks/typescript && npm install && npm test
+    cd generated/sdks/typescript && npm --offline test
     @echo "Testing Java 17..."
     command -v mvn >/dev/null 2>&1
-    cd generated/sdks/java/meshpack && mvn -q test
+    cd generated/sdks/java/meshpack && mvn --offline -q test
 
 publish: generate check-version validate lint test compile
     @echo "Publishing..."
@@ -125,15 +155,15 @@ publish: generate check-version validate lint test compile
 publish-dry-run: generate check-version determinism-check validate lint test compile artifact-hygiene
     @echo "Dry-run: packing artifacts (no upload)..."
     @echo "--- Python ---"
-    cd generated/sdks/python && python3 -m build
+    cd generated/sdks/python && {{venv_python}} -m build
     @echo "--- TypeScript ---"
     if command -v npm >/dev/null 2>&1; then \
-        cd generated/sdks/typescript && npm pack --dry-run; \
+        cd generated/sdks/typescript && npm --offline pack --dry-run; \
     fi
     @echo "--- Rust ---"
-    cd generated/sdks/rust/meshpack && cargo package --list
+    cd generated/sdks/rust/meshpack && cargo package --list --locked --offline
     @echo "--- Java ---"
-    cd generated/sdks/java/meshpack && mvn -q clean package
+    cd generated/sdks/java/meshpack && mvn --offline -q clean package
     @echo "Dry-run complete. Review output above before tagging a release."
 
 all: generate check-version determinism-check validate lint test compile
@@ -143,8 +173,9 @@ public-readiness: publish-dry-run check-clean
 clean:
     rm -rf generated/
 
-# Workspace quality contract. Profiles are monotonic and have no external side effects.
-quality-fast: validate test lint
+# Workspace quality contract. Profiles are monotonic, consume pre-provisioned
+# local dependencies only, and have no external side effects.
+quality-fast: check-locks validate test lint
 
 quality-full: quality-fast determinism-check artifact-hygiene check-version
 

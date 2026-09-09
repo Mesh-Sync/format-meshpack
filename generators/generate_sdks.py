@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from jinja2 import Environment, FileSystemLoader
 
+from lock_inputs import copy_lock_inputs
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(BASE_DIR)
@@ -696,6 +698,7 @@ def main() -> None:
         os.path.join(OUTPUT_DIR, "rust", "meshpack", "README.md"),
     )
     _write_package_license(os.path.join(OUTPUT_DIR, "rust", "meshpack", "LICENSE"))
+    copy_lock_inputs(OUTPUT_DIR, languages=("rust",))
 
     render_template(
         "typescript/index.ts.j2",
@@ -723,6 +726,7 @@ def main() -> None:
         os.path.join(OUTPUT_DIR, "typescript", "README.md"),
     )
     _write_package_license(os.path.join(OUTPUT_DIR, "typescript", "LICENSE"))
+    copy_lock_inputs(OUTPUT_DIR, languages=("typescript",))
 
     render_template(
         "java/MeshPack.java.j2",

@@ -54,7 +54,9 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 
 | Command | Description |
 |---------|-------------|
+| `just provision` | Bootstraps a clean checkout: installs Python tooling, generates SDKs with authoritative locks, then fetches Rust, TypeScript, and Java dependencies. This network-capable step is never part of a quality profile. |
 | `just generate` | Generates SDK code for Python, Rust, TypeScript, and Java 17 into `generated/sdks/`. |
+| `just check-locks` | Verifies generated Cargo and npm locks are byte-identical to their tracked authoritative inputs under `generators/locks/`. |
 | `just check-version` | Verifies all generated package versions match `VERSION`. |
 | `just determinism-check` | Runs generation twice and verifies generated source output is byte-identical. |
 | `just artifact-hygiene` | Scans public samples and generated package roots for secrets, private-key files, missing package metadata, and public sample privacy issues. |
@@ -63,6 +65,7 @@ This repository uses [`just`](https://github.com/casey/just) for task automation
 | `just compile` | Builds the generated SDKs (Python wheel, Rust crate, NPM package, Maven package). |
 | `just lint` | Runs generator lint plus generated Rust, TypeScript, and Java compile checks. |
 | `just test` | Runs Python tests and generated Rust, TypeScript, and Java test/build gates. |
+| `just quality-fast` | Validates and checks all four SDK languages using only pre-provisioned local dependencies and offline/locked package-manager modes. |
 | `just all` | Runs generate, validate, lint, test, and compile. |
 | `just public-readiness` | Runs the full dry-run gate, artifact hygiene, and clean-worktree checks for public exposure. |
 | `just clean` | Removes the `generated/` directory. |
