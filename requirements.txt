@@ -3,7 +3,7 @@ check-jsonschema
 jsonschema
 referencing
 build
-setuptools>=77
+setuptools>=84.0.0
 wheel
 twine
 pytest
