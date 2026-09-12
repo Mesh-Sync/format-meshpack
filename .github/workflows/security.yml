@@ -84,7 +84,7 @@ jobs:
           cd generated/sdks/java/meshpack
           mvn -q org.cyclonedx:cyclonedx-maven-plugin:2.9.2:makeBom -DskipTests
       - name: Maven dependency vulnerability gate
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
         with:
           sbom: generated/sdks/java/meshpack/target/bom.json
           fail-build: true
