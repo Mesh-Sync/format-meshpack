@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.11"
-      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3
       - name: Install generator dependencies
         run: just install-deps
       - name: Generate SDK sources for analysis
@@ -57,7 +57,7 @@ jobs:
           key: meshpack-maven-${{ runner.os }}-${{ hashFiles('generators/templates/java/pom.xml.j2') }}
           restore-keys: |
             meshpack-maven-${{ runner.os }}-
-      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3
       - name: Install Python dependencies
         run: just install-deps
       - name: Generate SDKs
@@ -128,7 +128,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3
       - name: Build dry-run artifacts
         run: |
           just provision
