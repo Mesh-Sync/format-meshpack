@@ -7,7 +7,7 @@ setuptools>=77
 wheel
 twine
 pytest
-pydantic>=2.13.5
+pydantic>=2.14.1
 mypy
 types-python-dateutil
 black
